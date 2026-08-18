@@ -1,0 +1,51 @@
+# Codex app-server 接入说明
+
+本项目通过本机 Codex CLI 的 stdio transport 接入，不调用 OpenAI API，也不复制 Codex Desktop 的前端资源。
+
+## 当前环境
+
+- Codex CLI：0.147.0
+- 启动命令：`codex.cmd app-server --stdio`
+- Windows 启动：后端通过 `cmd.exe /d /c` 启动，兼容 `.cmd` 文件。
+- 初始化握手：`initialize`
+
+新版 CLI 的 JSON Schema 可通过以下命令重新生成：
+
+```powershell
+codex.cmd app-server generate-json-schema --experimental --out .tmp/app-server-schema
+```
+
+## 使用的方法
+
+- `initialize`：声明 `codex-web` 客户端能力。
+- `thread/start`：使用选中的工作空间目录创建 Codex 线程，审批策略为 `on-request`。
+- `turn/start`：向线程发送文本任务。
+- `turn/interrupt`：按 `threadId` 和 `turnId` 停止任务。
+
+## 事件规范化
+
+后端只把用户可见事件转发到浏览器：
+
+| app-server 事件 | SSE 事件 |
+|---|---|
+| `item/agentMessage/delta` | `agent.message.delta` |
+| `item/commandExecution/outputDelta` | `tool.call.output` |
+| `item/started` | `tool.call.started` |
+| `item/completed` | `tool.call.completed` |
+| `turn/started` | `turn.started` |
+| `turn/completed` | `turn.completed` |
+| `turn/diff/updated` | `diff.updated` |
+| `item/*/requestApproval` | `approval.request` |
+| `error` | `error` |
+
+Reasoning 和隐藏思维链事件不会进入 JSONL，也不会发送到浏览器。
+
+## 审批
+
+命令审批使用新版 app-server 响应格式：
+
+```json
+{"decision":"accept"}
+```
+
+也支持 `decline`、`cancel` 和 `acceptForSession`。文件变更审批使用对应的 `accept`、`decline`、`cancel` 决策。

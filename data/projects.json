@@ -1,0 +1,28 @@
+[ {
+  "id" : "3d7d269a-8592-4744-a63c-57028414e8b0",
+  "name" : "codex-cli-web",
+  "path" : "D:\\work\\coding\\codex-cli-web",
+  "isGitRepository" : false,
+  "lastBranch" : null,
+  "createdAt" : "2026-08-17T22:59:38.044Z",
+  "updatedAt" : "2026-08-17T22:59:38.044Z",
+  "lastUsedAt" : "2026-08-17T22:59:38.044Z"
+}, {
+  "id" : "4f993adb-46b9-4269-8c9e-009be2d57a46",
+  "name" : "blog",
+  "path" : "D:\\work\\coding\\blog",
+  "isGitRepository" : true,
+  "lastBranch" : "master",
+  "createdAt" : "2026-08-18T00:18:39.087Z",
+  "updatedAt" : "2026-08-18T00:18:39.087Z",
+  "lastUsedAt" : "2026-08-18T00:18:39.087Z"
+}, {
+  "id" : "297d4619-d64d-4feb-9555-e0898154dd63",
+  "name" : "shxt-html",
+  "path" : "D:\\work\\coding\\shxt-html",
+  "isGitRepository" : true,
+  "lastBranch" : "dev_20260628",
+  "createdAt" : "2026-08-18T00:28:50.406Z",
+  "updatedAt" : "2026-08-18T00:28:50.406Z",
+  "lastUsedAt" : "2026-08-18T00:28:50.406Z"
+} ]
