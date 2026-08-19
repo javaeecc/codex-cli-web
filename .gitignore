@@ -6,3 +6,4 @@ data/uploads/*
 !data/sessions/.gitkeep
 !data/uploads/.gitkeep
 *.log
+.idea/
