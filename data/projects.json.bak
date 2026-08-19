@@ -8,12 +8,21 @@
   "updatedAt" : "2026-08-17T22:59:38.044Z",
   "lastUsedAt" : "2026-08-17T22:59:38.044Z"
 }, {
-  "id" : "4f993adb-46b9-4269-8c9e-009be2d57a46",
-  "name" : "blog",
-  "path" : "D:\\work\\coding\\blog",
+  "id" : "2b964862-4d5b-4991-b462-a8d5d1915ab2",
+  "name" : "codex-api",
+  "path" : "D:\\work\\github\\codex-api",
   "isGitRepository" : true,
   "lastBranch" : "master",
-  "createdAt" : "2026-08-18T00:18:39.087Z",
-  "updatedAt" : "2026-08-18T00:18:39.087Z",
-  "lastUsedAt" : "2026-08-18T00:18:39.087Z"
+  "createdAt" : "2026-08-19T09:32:44.234Z",
+  "updatedAt" : "2026-08-19T09:32:44.234Z",
+  "lastUsedAt" : "2026-08-19T09:32:44.234Z"
+}, {
+  "id" : "56d87329-6b90-45c2-abb7-c1a3efc25a99",
+  "name" : "shxt-html",
+  "path" : "D:\\work\\coding\\shxt-html",
+  "isGitRepository" : true,
+  "lastBranch" : "dev_20260628",
+  "createdAt" : "2026-08-19T15:01:24.657Z",
+  "updatedAt" : "2026-08-19T15:01:24.657Z",
+  "lastUsedAt" : "2026-08-19T15:01:24.657Z"
 } ]

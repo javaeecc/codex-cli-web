@@ -5,6 +5,7 @@ import cn.codexweb.model.Project;
 import cn.codexweb.model.Session;
 import cn.codexweb.model.StoredEvent;
 import cn.codexweb.storage.ProjectStore;
+import cn.codexweb.storage.AppSettingsStore;
 import cn.codexweb.storage.SessionStore;
 import cn.codexweb.workspace.WorkspaceGuard;
 import cn.codexweb.config.CodexWebProperties;
@@ -27,10 +28,11 @@ public class CodexSessionService implements CodexProtocolClient.Listener {
     private final SseHub hub;
     private final WorkspaceGuard guard;
     private final CodexWebProperties properties;
+    private final AppSettingsStore appSettings;
     private final ObjectMapper mapper = new ObjectMapper();
 
-    public CodexSessionService(SessionStore sessions, ProjectStore projects, CodexProcessManager processManager, SseHub hub, WorkspaceGuard guard, CodexWebProperties properties) {
-        this.sessions = sessions; this.projects = projects; this.processManager = processManager; this.hub = hub; this.guard = guard; this.properties = properties;
+    public CodexSessionService(SessionStore sessions, ProjectStore projects, CodexProcessManager processManager, SseHub hub, WorkspaceGuard guard, CodexWebProperties properties, AppSettingsStore appSettings) {
+        this.sessions = sessions; this.projects = projects; this.processManager = processManager; this.hub = hub; this.guard = guard; this.properties = properties; this.appSettings = appSettings;
     }
 
     public List<StoredEvent> events(String sessionId) { requireSession(sessionId); return sessions.events(sessionId); }
@@ -48,13 +50,14 @@ public class CodexSessionService implements CodexProtocolClient.Listener {
         guard.requireDirectory(project.path);
         CodexProtocolClient client = processManager.ensureStarted(this);
         if (session.codexThreadId == null) {
-            JsonNode response = client.startThread(project.path);
+            JsonNode response = client.startThread(project.path, appSettings.get().approvalPolicy);
             JsonNode thread = response == null ? null : response.get("thread");
             session.codexThreadId = thread == null ? null : text(thread.get("id"));
             if (session.codexThreadId == null) throw new IllegalStateException("Codex 未返回 thread id");
             sessions.save(session);
         }
         session.lastUserMessage = text;
+        if ("新建会话".equals(session.title)) session.title = summarizeTitle(text);
         session.status = "RUNNING";
         sessions.save(session);
         append(session, "turn.started", map("text", text));
@@ -69,7 +72,7 @@ public class CodexSessionService implements CodexProtocolClient.Listener {
             try {
                 result = client.startTurn(session.codexThreadId, text, safeAttachments);
             } catch (RuntimeException staleThread) {
-                JsonNode replacement = client.startThread(project.path);
+                JsonNode replacement = client.startThread(project.path, appSettings.get().approvalPolicy);
                 JsonNode replacementThread = replacement == null ? null : replacement.get("thread");
                 session.codexThreadId = replacementThread == null ? null : text(replacementThread.get("id"));
                 if (session.codexThreadId == null) throw staleThread;
@@ -89,6 +92,30 @@ public class CodexSessionService implements CodexProtocolClient.Listener {
         if (session.currentTurnId == null) return;
         processManager.client().interrupt(session.codexThreadId, session.currentTurnId);
         session.status = "CANCELLED"; sessions.save(session); append(session, "turn.cancelled", Collections.<String, Object>emptyMap());
+    }
+
+    public synchronized void steer(String sessionId, String text, java.util.List<String> attachments) {
+        if (text == null || text.trim().isEmpty()) throw new ApiException(HttpStatus.BAD_REQUEST, "MESSAGE_REQUIRED", "请输入引导内容");
+        Session session = requireSession(sessionId);
+        if (!"RUNNING".equals(session.status) || session.codexThreadId == null || session.currentTurnId == null) throw new ApiException(HttpStatus.CONFLICT, "SESSION_NOT_RUNNING", "当前会话没有正在运行的任务");
+        CodexProtocolClient client = processManager.client();
+        if (client == null) throw new ApiException(HttpStatus.SERVICE_UNAVAILABLE, "CODEX_NOT_RUNNING", "Codex 尚未运行");
+        java.util.List<String> safeAttachments = new java.util.ArrayList<String>();
+        if (attachments != null) for (String attachment : attachments) {
+            java.nio.file.Path candidate = java.nio.file.Paths.get(attachment).toAbsolutePath().normalize();
+            java.nio.file.Path uploadRoot = sessionsUploadRoot(session.id);
+            if (candidate.startsWith(uploadRoot) && java.nio.file.Files.isRegularFile(candidate)) safeAttachments.add(candidate.toString());
+        }
+        client.steerTurn(session.codexThreadId, session.currentTurnId, text, safeAttachments);
+        session.lastUserMessage = text;
+        sessions.save(session);
+        append(session, "turn.steered", map("text", text));
+    }
+
+    private String summarizeTitle(String value) {
+        String normalized = value == null ? "" : value.trim().replaceAll("\\s+", " ");
+        if (normalized.length() <= 24) return normalized.isEmpty() ? "新建会话" : normalized;
+        return normalized.substring(0, 24) + "...";
     }
 
     public void approval(String sessionId, Long requestId, String decision) {
@@ -122,6 +149,10 @@ public class CodexSessionService implements CodexProtocolClient.Listener {
         data.put("method", method); if (params != null) data.put("payload", mapper.convertValue(params, Map.class));
         if (requestId != null) data.put("requestId", requestId);
         String delta = findText(params, "delta"); if (delta == null) delta = findText(params, "text"); if (delta != null) data.put("text", delta);
+        String itemId = findItemId(params); if (itemId != null) data.put("itemId", itemId);
+        String phase = findText(params, "phase");
+        if (phase == null) phase = findText(params == null ? null : params.get("item"), "phase");
+        if (phase != null) data.put("phase", phase);
         if (normalized.equals("turn.started")) updateStatus(session, "RUNNING");
         if (normalized.equals("approval.request")) updateStatus(session, "WAITING_APPROVAL");
         if (normalized.equals("turn.completed")) { session.currentTurnId = null; updateStatus(session, "COMPLETED"); }
@@ -168,6 +199,12 @@ public class CodexSessionService implements CodexProtocolClient.Listener {
     }
     private String text(JsonNode node) { return node == null || node.isNull() ? null : node.asText(); }
     private String findText(JsonNode node, String field) { return node == null || node.get(field) == null ? null : text(node.get(field)); }
+    private String findItemId(JsonNode params) {
+        String itemId = findText(params, "itemId");
+        if (itemId != null) return itemId;
+        JsonNode item = params == null ? null : params.get("item");
+        return findText(item, "id");
+    }
     private boolean willRetry(JsonNode params) { return params != null && params.path("willRetry").asBoolean(false); }
     private Map<String, Object> map(String key, Object value) { Map<String, Object> result = new LinkedHashMap<String, Object>(); result.put(key, value); return result; }
     private java.nio.file.Path sessionsUploadRoot(String sessionId) { return java.nio.file.Paths.get(properties.getDataDir()).toAbsolutePath().normalize().resolve("uploads").resolve(sessionId); }

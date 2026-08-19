@@ -29,11 +29,10 @@ npm run serve
 - Codex CLI 0.147.0+
 - 已完成 Codex 登录
 
-当前配置默认允许选择 `D:\work\coding` 下的工作空间，Codex 命令为 `codex.cmd`。如需指定绝对路径或远程访问参数，可设置：
+可从系统磁盘根目录浏览并选择任意本地工作空间，Codex 命令为 `codex.cmd`。如需指定绝对路径或远程访问参数，可设置：
 
 ```powershell
 $env:CODEX_COMMAND = 'C:\nvm4w\nodejs\codex.cmd'
-$env:CODEX_WEB_ALLOWED_ROOT = 'D:\work\coding'
 $env:CODEX_WEB_HOST = '127.0.0.1'
 $env:CODEX_WEB_PORT = '8080'
 $env:CODEX_WEB_TOKEN = 'change-this-token'

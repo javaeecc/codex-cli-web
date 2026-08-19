@@ -1,13 +1,18 @@
 import axios from 'axios'
 
-const client = axios.create({ baseURL: '/api', timeout: 30000 })
+const client = axios.create({ baseURL: '/api', timeout: 30000, withCredentials: true })
 const urlToken = new URLSearchParams(location.search).get('token')
 if (urlToken) client.defaults.headers.common['X-Codex-Token'] = urlToken
 export default {
+  authMe: () => client.get('/auth/me'),
+  login: payload => client.post('/auth/login', payload),
+  logout: () => client.post('/auth/logout'),
   health: () => client.get('/health'),
   runtime: () => client.get('/runtime'),
   runtimeStart: () => client.post('/runtime/start'),
   runtimeStop: () => client.post('/runtime/stop'),
+  settings: () => client.get('/settings'),
+  updateSettings: payload => client.put('/settings', payload),
   projects: () => client.get('/projects'),
   project: id => client.get(`/projects/${id}`),
   createProject: payload => client.post('/projects', payload),
@@ -18,8 +23,9 @@ export default {
   createSession: (projectId, payload) => client.post(`/projects/${projectId}/sessions`, payload),
   session: id => client.get(`/sessions/${id}`),
   events: id => client.get(`/sessions/${id}/events`),
-  streamUrl: id => { const token = new URLSearchParams(location.search).get('token'); const base = location.port === '8081' ? 'http://127.0.0.1:8090/api' : '/api'; return `${base}/sessions/${encodeURIComponent(id)}/stream${token ? `?token=${encodeURIComponent(token)}` : ''}` },
+  streamUrl: id => { const token = new URLSearchParams(location.search).get('token'); return `/api/sessions/${encodeURIComponent(id)}/stream${token ? `?token=${encodeURIComponent(token)}` : ''}` },
   startTurn: (id, payload) => client.post(`/sessions/${id}/turns`, payload),
+  steerTurn: (id, payload) => client.post(`/sessions/${id}/steer`, payload),
   cancelTurn: id => client.post(`/sessions/${id}/cancel`),
   respondApproval: (id, payload) => client.post(`/sessions/${id}/approval`, payload),
   exportSession: id => client.get(`/sessions/${id}/export`),

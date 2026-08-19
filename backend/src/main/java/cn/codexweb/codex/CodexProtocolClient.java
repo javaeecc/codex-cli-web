@@ -90,8 +90,21 @@ public class CodexProtocolClient {
         params.put("capabilities", capabilities); request("initialize", params);
     }
 
-    public JsonNode startThread(String cwd) {
-        Map<String, Object> params = new HashMap<String, Object>(); params.put("cwd", cwd); params.put("approvalPolicy", "on-request"); return request("thread/start", params);
+    public JsonNode startThread(String cwd, String approvalPolicy) {
+        Map<String, Object> params = new HashMap<String, Object>();
+        params.put("cwd", cwd);
+        params.put("approvalPolicy", approvalPolicy);
+        Map<String, Object> sandboxPolicy = new HashMap<String, Object>();
+        if ("never".equals(approvalPolicy)) {
+            sandboxPolicy.put("type", "dangerFullAccess");
+            params.put("privilegedEscalationApproved", true);
+        } else {
+            sandboxPolicy.put("type", "workspaceWrite");
+            sandboxPolicy.put("writableRoots", java.util.Collections.singletonList(cwd));
+            sandboxPolicy.put("networkAccess", false);
+        }
+        params.put("sandboxPolicy", sandboxPolicy);
+        return request("thread/start", params);
     }
 
     public JsonNode startTurn(String threadId, String text) { return startTurn(threadId, text, java.util.Collections.<String>emptyList()); }
@@ -109,12 +122,32 @@ public class CodexProtocolClient {
         Map<String, Object> params = new HashMap<String, Object>(); params.put("threadId", threadId); params.put("input", inputs); return request("turn/start", params);
     }
 
+    public JsonNode steerTurn(String threadId, String turnId, String text, java.util.List<String> attachments) {
+        Map<String, Object> input = new HashMap<String, Object>(); input.put("type", "text"); input.put("text", text);
+        java.util.List<Map<String, Object>> inputs = new java.util.ArrayList<Map<String, Object>>(); inputs.add(input);
+        if (attachments != null) for (String path : attachments) {
+            if (path == null || path.trim().isEmpty()) continue;
+            String lower = path.toLowerCase();
+            if (lower.endsWith(".png") || lower.endsWith(".jpg") || lower.endsWith(".jpeg") || lower.endsWith(".gif") || lower.endsWith(".webp")) {
+                Map<String, Object> image = new HashMap<String, Object>(); image.put("type", "localImage"); image.put("path", path); inputs.add(image);
+            } else input.put("text", String.valueOf(input.get("text")) + "\n\n附件路径：" + path);
+        }
+        Map<String, Object> params = new HashMap<String, Object>(); params.put("threadId", threadId); params.put("expectedTurnId", turnId); params.put("input", inputs); return request("turn/steer", params);
+    }
+
     public void interrupt(String threadId, String turnId) {
         Map<String, Object> params = new HashMap<String, Object>(); params.put("threadId", threadId); params.put("turnId", turnId); request("turn/interrupt", params);
     }
 
     public void close() {
         try { writer.close(); } catch (IOException ignored) { }
-        if (process.isAlive()) process.destroy();
+        if (!process.isAlive()) return;
+        try {
+            if (!process.waitFor(3, TimeUnit.SECONDS)) process.destroy();
+            if (process.isAlive() && !process.waitFor(2, TimeUnit.SECONDS)) process.destroyForcibly();
+        } catch (InterruptedException interrupted) {
+            Thread.currentThread().interrupt();
+            process.destroyForcibly();
+        }
     }
 }

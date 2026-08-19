@@ -1,5 +1,19 @@
 <template>
-  <div class="shell" :class="{ 'left-collapsed': leftCollapsed, 'right-collapsed': rightCollapsed }">
+  <div v-if="!authReady" class="auth-loading"><span class="brand-mark">C</span><span>正在连接 Codex Web...</span></div>
+  <div v-else-if="!authenticated" class="login-page">
+    <div class="login-panel">
+      <div class="login-brand"><span class="brand-mark">C</span><div><strong>Codex Web</strong><small>本地开发工作台</small></div></div>
+      <h1>登录</h1>
+      <p class="login-subtitle">登录后继续使用你的工作空间和会话。</p>
+      <form class="login-form" @submit.prevent="submitLogin">
+        <label>用户名<input v-model.trim="loginForm.username" type="email" autocomplete="username" placeholder="请输入用户名" autofocus></label>
+        <label>密码<input v-model="loginForm.password" type="password" autocomplete="current-password" placeholder="请输入密码"></label>
+        <p v-if="loginError" class="login-error" role="alert">{{ loginError }}</p>
+        <el-button class="login-submit" type="primary" native-type="submit" :loading="loginLoading" :disabled="!loginForm.username || !loginForm.password">登录</el-button>
+      </form>
+    </div>
+  </div>
+  <div v-else class="shell" :class="{ 'left-collapsed': leftCollapsed, 'right-collapsed': rightCollapsed }">
     <header class="topbar">
       <div class="brand"><button class="mobile-menu-button" type="button" title="打开会话列表" @click="leftCollapsed = !leftCollapsed"><i class="el-icon-menu"></i></button><span class="brand-mark">C</span><span>Codex Web</span></div>
       <div class="top-context">
@@ -10,9 +24,10 @@
         <el-select v-if="currentProject && branches.length" v-model="currentBranch" size="mini" class="branch-select" @change="checkoutBranch"><el-option v-for="branch in branches" :key="branch" :label="branch" :value="branch"></el-option></el-select><span v-else>{{ currentBranch || '无分支' }}</span>
       </div>
       <div class="top-actions">
+        <el-button class="icon-button" icon="el-icon-switch-button" circle title="退出登录" @click="logout"></el-button>
         <span class="runtime-pill" :class="runtime.running ? 'is-live' : 'is-idle'"><span class="status-dot"></span>{{ runtime.running ? 'Codex 运行中' : 'Codex 未启动' }}</span>
         <el-button class="icon-button" icon="el-icon-refresh" circle title="刷新" @click="refreshAll"></el-button>
-        <el-button class="icon-button" icon="el-icon-setting" circle title="运行时设置" @click="runtimeAction"></el-button>
+        <el-button class="icon-button" icon="el-icon-setting" circle title="设置" @click="openSettings"></el-button>
       </div>
     </header>
 
@@ -26,12 +41,12 @@
           <button v-for="project in projects" :key="project.id" class="project-row" :class="{ active: currentProject && currentProject.id === project.id }" @click="selectProject(project)">
             <span class="project-icon" :class="{ git: project.isGitRepository }"><i :class="project.isGitRepository ? 'el-icon-connection' : 'el-icon-folder'"></i></span>
             <span class="project-copy"><strong>{{ project.name }}</strong><small>{{ compactPath(project.path) }}</small></span>
-            <i class="el-icon-more project-more" @click.stop="editProject(project)"></i>
+            <i class="el-icon-more project-more" title="重命名项目" @click.stop="editProject(project)"></i><i class="el-icon-delete project-delete" title="删除项目" @click.stop="deleteProject(project)"></i>
           </button>
         </div>
         <div class="empty-side" v-else><i class="el-icon-folder-opened"></i><span>还没有工作空间</span><el-button size="mini" @click="openWorkspacePicker">选择目录</el-button></div>
 
-        <div class="session-heading"><span>会话</span><el-button type="text" icon="el-icon-plus" :disabled="!currentProject" title="新建会话" @click="createSession"></el-button></div><div class="session-search"><i class="el-icon-search"></i><input v-model="sessionSearch" placeholder="搜索会话"></div>
+        <div class="session-heading"><span>会话</span><div class="session-heading-actions"><el-button type="text" icon="el-icon-edit-outline" :disabled="!currentSession" title="修改会话" @click="renameSession"></el-button><el-button type="text" icon="el-icon-download" :disabled="!currentSession" title="导出会话" @click="exportSession"></el-button><el-button type="text" icon="el-icon-box" :disabled="!currentSession" :title="currentSession && currentSession.archived ? '取消归档' : '归档'" @click="toggleArchive"></el-button><el-button type="text" icon="el-icon-plus" :disabled="!currentProject" title="新建会话" @click="createSession"></el-button></div></div><div class="session-search"><i class="el-icon-search"></i><input v-model="sessionSearch" placeholder="搜索会话"></div>
         <div class="session-list" v-if="sessions.length">
           <button v-for="session in visibleSessions" :key="session.id" class="session-row" :class="{ active: currentSession && currentSession.id === session.id }" @click="selectSession(session)">
             <span class="session-status" :class="statusClass(session.status)"></span>
@@ -44,24 +59,21 @@
       </aside>
 
       <main class="conversation panel-border">
-        <div class="conversation-header" v-if="currentSession">
-          <div><h1>{{ currentSession.title }}</h1><p>{{ currentProject ? currentProject.path : '' }}</p></div>
-          <div class="conversation-tools"><el-button icon="el-icon-edit-outline" circle title="重命名" @click="renameSession"></el-button><el-button icon="el-icon-download" circle title="导出会话" @click="exportSession"></el-button><el-button icon="el-icon-box" circle :title="currentSession.archived ? '取消归档' : '归档'" @click="toggleArchive"></el-button></div>
-        </div>
-        <div class="conversation-empty" v-else><div class="empty-glyph">C</div><h2>准备开始</h2><p>选择一个工作空间，创建会话，然后把任务交给 Codex。</p><el-button type="primary" icon="el-icon-folder-opened" @click="openWorkspacePicker">选择工作空间</el-button></div>
+        <div class="conversation-empty" v-if="!currentSession"><div class="empty-glyph">C</div><h2>准备开始</h2><p>选择一个工作空间，创建会话，然后把任务交给 Codex。</p><el-button type="primary" icon="el-icon-folder-opened" @click="openWorkspacePicker">选择工作空间</el-button></div>
         <div class="message-scroll" ref="messageScroll" v-if="currentSession">
           <div v-if="!messages.length" class="first-prompt"><span class="prompt-kicker">{{ currentProject ? currentProject.name : 'Codex' }}</span><h2>你想处理什么？</h2><p>可以从查看项目结构、解释代码或修改功能开始。</p></div>
-          <div v-for="(message, index) in messages" :key="message.id || index" class="message-block" :class="message.role">
-            <div class="message-meta"><span class="avatar" :class="message.role">{{ message.role === 'user' ? '你' : 'C' }}</span><strong>{{ message.role === 'user' ? '你' : 'Codex' }}</strong><span>{{ formatTime(message.timestamp) }}</span></div>
+          <div v-for="(message, index) in displayMessages" :key="message.id || index" class="message-block" :class="message.role">
+            <details v-if="message.role === 'thinking'" class="thinking-block" :open="message.thinkingOpen" @toggle="setThinkingOpen(message, $event)"><summary><i class="el-icon-caret-right"></i><span>思考过程</span><span v-if="message.streaming" class="thinking-live">正在思考</span></summary><div class="thinking-content markdown-body" v-html="renderMarkdown(message.text)"></div></details>
+            <div v-if="message.role === 'user'" class="message-meta"><span class="avatar user">你</span><strong>你</strong><span>{{ formatTime(message.timestamp) }}</span></div>
             <div v-if="message.role === 'assistant'" class="markdown-body" v-html="renderMarkdown(message.text)"></div>
-            <div v-else class="user-message">{{ message.text }}</div>
-            <span v-if="message.streaming" class="typing-cursor"></span>
+            <div v-else-if="message.role === 'user'" class="user-message">{{ message.text }}</div>
+            <span v-if="message.role === 'assistant' && message.streaming" class="typing-cursor"></span>
           </div>
           <div v-if="running && liveStatus" class="assistant-status" role="status" aria-live="polite"><i class="el-icon-loading"></i><span>{{ liveStatus }}</span></div>
           <div v-if="errorMessage" class="error-banner"><i class="el-icon-warning-outline"></i><span>{{ errorMessage }}</span><el-button size="mini" @click="retryLast">重试</el-button></div>
         </div>
         <div class="composer" v-if="currentSession">
-        <div class="composer-shell" :class="{ focus: composerFocused }"><textarea v-model="draft" rows="3" placeholder="描述你希望 Codex 完成的任务..." @focus="composerFocused = true" @blur="composerFocused = false" @keydown.ctrl.enter.prevent="sendMessage" @keydown.meta.enter.prevent="sendMessage"></textarea><div class="composer-actions"><span class="composer-hint">{{ socketOpen ? 'Ctrl / Cmd + Enter 发送' : '正在连接 Codex...' }}<span v-if="attachments.length"> · {{ attachments.length }} 个附件</span></span><div><input ref="upload" type="file" hidden multiple @change="uploadFiles"><el-button class="icon-button" icon="el-icon-paperclip" circle title="上传文件" @click="$refs.upload.click()"></el-button><el-button class="stop-button" v-if="running" icon="el-icon-video-pause" @click="cancelTurn">停止</el-button><el-button type="primary" icon="el-icon-position" :loading="sending" :disabled="!draft.trim() || running" @click="sendMessage">发送</el-button></div></div></div>
+        <div class="composer-shell" :class="{ focus: composerFocused }"><textarea v-model="draft" rows="3" placeholder="描述你希望 Codex 完成的任务..." @focus="composerFocused = true" @blur="composerFocused = false" @keydown="handleComposerKeydown"></textarea><div class="composer-actions"><span class="composer-hint">{{ socketOpen ? 'Enter 发送 · Ctrl / Cmd + Enter 换行' : '正在连接 Codex...' }}<span v-if="attachments.length"> · {{ attachments.length }} 个附件</span></span><div><input ref="upload" type="file" hidden multiple @change="uploadFiles"><el-button class="icon-button" icon="el-icon-paperclip" circle title="上传文件" @click="$refs.upload.click()"></el-button><el-button class="stop-button" v-if="running" icon="el-icon-video-pause" @click="cancelTurn">停止</el-button><el-button type="primary" icon="el-icon-position" :loading="sending" :disabled="!draft.trim() || sending" @click="sendMessage">{{ running ? '引导' : '发送' }}</el-button></div></div></div>
         </div>
       </main>
 
@@ -77,7 +89,8 @@
     </div>
 
     <el-dialog title="选择工作空间" :visible.sync="workspaceDialog" width="600px" custom-class="workspace-dialog"><div class="picker-path"><el-button icon="el-icon-back" circle :disabled="!workspaceParent" @click="browse(workspaceParent)"></el-button><span>{{ workspacePath }}</span><el-button type="text" icon="el-icon-folder-add" title="新建目录" @click="createFolder"></el-button></div><div class="root-switch"><button v-for="root in workspaceRoots" :key="root.path" :class="{ active: workspacePath === root.path }" @click="browse(root.path)"><i class="el-icon-folder"></i>{{ root.name }}</button></div><div class="browser-list"><button v-for="item in workspaceItems" :key="item.path" class="browser-row" :class="{ selected: selectedWorkspace === item.path }" @dblclick="browse(item.path)" @click="selectedWorkspace = item.path"><i :class="item.isGitRepository ? 'el-icon-connection' : 'el-icon-folder'"></i><span>{{ item.name }}</span><i class="el-icon-arrow-right"></i></button><div v-if="!workspaceItems.length" class="browser-empty">此目录没有子目录</div></div><div class="dialog-footer"><span class="selected-path">{{ selectedWorkspace || '双击进入目录，或选择当前目录' }}</span><el-button @click="workspaceDialog = false">取消</el-button><el-button type="primary" icon="el-icon-check" :disabled="!selectedWorkspace" @click="confirmWorkspace">选择此目录</el-button></div></el-dialog>
-    <el-dialog title="审批请求" :visible.sync="approvalDialog" width="540px" custom-class="approval-dialog" :close-on-click-modal="false"><div class="approval-intro"><span class="approval-icon"><i class="el-icon-lock"></i></span><div><strong>Codex 请求执行操作</strong><p>请确认这项操作是否可以继续。</p></div></div><div class="approval-command"><code>{{ approvalCommand }}</code></div><div class="dialog-footer"><el-button @click="respondApproval('decline')">拒绝</el-button><el-button type="primary" @click="respondApproval('accept')">允许一次</el-button><el-button type="success" @click="respondApproval('acceptForSession')">本会话允许</el-button></div></el-dialog>
+    <el-dialog title="设置" :visible.sync="settingsDialog" width="540px" custom-class="settings-dialog"><div class="settings-section"><div class="settings-label"><strong>工作权限</strong><span>控制 Codex 执行命令和修改文件时的授权方式。</span></div><el-select v-model="settings.approvalPolicy" class="settings-select"><el-option label="请求批准" value="on-request"></el-option><el-option label="帮我批准" value="on-failure"></el-option><el-option label="完全访问" value="never"></el-option></el-select><p class="settings-warning" v-if="settings.approvalPolicy === 'never'"><i class="el-icon-warning-outline"></i> 完全访问会允许 Codex 在工作空间中直接运行命令并修改文件，请确认你信任当前任务。</p><p class="settings-note">策略对新建会话生效，当前会话不会被中断。</p></div><div class="settings-section runtime-settings"><div class="settings-label"><strong>Codex 运行时</strong><span>{{ runtime.running ? '当前正在运行' : '当前未启动' }}</span></div><el-button size="small" :type="runtime.running ? 'danger' : 'success'" :icon="runtime.running ? 'el-icon-video-pause' : 'el-icon-video-play'" :loading="runtimeBusy" :disabled="runtimeBusy" @click="runtimeAction">{{ runtimeBusy ? '正在切换' : (runtime.running ? '停止 Codex' : '启动 Codex') }}</el-button></div><div class="dialog-footer"><el-button @click="settingsDialog = false">取消</el-button><el-button type="primary" icon="el-icon-check" :loading="settingsSaving" @click="saveSettings">保存设置</el-button></div></el-dialog>
+  </div>
   </div>
 </template>
 
@@ -87,20 +100,111 @@ import { marked } from 'marked'
 import DOMPurify from 'dompurify'
 
 export default {
-  data () { return { projects: [], sessions: [], currentProject: null, currentSession: null, runtime: { running: false }, socket: null, socketOpen: false, leftCollapsed: false, rightCollapsed: false, activeTab: 'changes', tabs: [{ id: 'changes', label: 'Changes' }, { id: 'diff', label: 'Diff' }, { id: 'files', label: 'Files' }], messages: [], activities: [], liveStatus: '', draft: '', lastDraft: '', sending: false, running: false, errorMessage: '', gitFiles: [], currentBranch: '', branches: [], diffText: '', selectedFile: '', fileItems: [], fileContent: null, expandedPaths: {}, workspaceDialog: false, workspaceRoots: [], workspaceItems: [], workspacePath: '', workspaceParent: '', selectedWorkspace: '', approvalDialog: false, approvalRequestId: null, approvalCommand: '', composerFocused: false, showArchived: false, sessionSearch: '', attachments: [], statusTimer: null, seenEventIds: {} } },
-  computed: { visibleSessions () { const query = this.sessionSearch.trim().toLowerCase(); return this.sessions.filter(s => (this.showArchived || !s.archived) && (!query || `${s.title} ${s.lastUserMessage || ''}`.toLowerCase().includes(query))) } },
-  mounted () { this.connectSocket(); this.refreshAll() },
+  data () { return { authReady: false, authenticated: false, loginForm: { username: '', password: '' }, loginLoading: false, loginError: '', projects: [], sessions: [], currentProject: null, currentSession: null, runtime: { running: false }, runtimeBusy: false, settings: { approvalPolicy: 'on-request' }, settingsDialog: false, settingsSaving: false, socket: null, socketOpen: false, leftCollapsed: false, rightCollapsed: false, activeTab: 'changes', tabs: [{ id: 'changes', label: 'Changes' }, { id: 'diff', label: 'Diff' }, { id: 'files', label: 'Files' }], messages: [], itemPhases: {}, activities: [], liveStatus: '', draft: '', lastDraft: '', sending: false, running: false, errorMessage: '', gitFiles: [], currentBranch: '', branches: [], diffText: '', selectedFile: '', fileItems: [], fileContent: null, expandedPaths: {}, workspaceDialog: false, workspaceRoots: [], workspaceItems: [], workspacePath: '', workspaceParent: '', selectedWorkspace: '', approvalDialog: false, approvalRequestId: null, approvalCommand: '', composerFocused: false, showArchived: false, sessionSearch: '', attachments: [], statusTimer: null, seenEventIds: {} } },
+  computed: {
+    visibleSessions () { const query = this.sessionSearch.trim().toLowerCase(); return this.sessions.filter(s => (this.showArchived || !s.archived) && (!query || `${s.title} ${s.lastUserMessage || ''}`.toLowerCase().includes(query))) },
+    displayMessages () {
+      const result = []
+      let thinking = null
+      this.messages.forEach(message => {
+        if (message.role === 'assistant' && message.phase !== 'final_answer') {
+          if (!thinking) {
+            thinking = { id: `thinking-${message.id}`, role: 'thinking', text: '', streaming: false, thinkingOpen: false, sourceIds: [] }
+            result.push(thinking)
+          }
+          if (thinking.text && message.text) thinking.text += '\n\n'
+          thinking.text += message.text || ''
+          thinking.streaming = thinking.streaming || !!message.streaming
+          thinking.thinkingOpen = thinking.thinkingOpen || !!message.thinkingOpen
+          thinking.sourceIds.push(message.id)
+        } else {
+          thinking = null
+          result.push(message)
+        }
+      })
+      return result
+    }
+  },
+  mounted () { this.checkAuth() },
   beforeDestroy () { if (this.socket) this.socket.close(); this.stopStatusPolling() },
   methods: {
-    async refreshAll () { try { const [projects, runtime] = await Promise.all([api.projects(), api.runtime()]); this.projects = projects.data; this.runtime = runtime.data; if (this.currentProject) { const found = this.projects.find(p => p.id === this.currentProject.id); if (found) await this.selectProject(found) } else if (this.projects.length) await this.selectProject(this.projects[0]) } catch (e) { this.notifyError(e) } },
+    async checkAuth () {
+      try {
+        await api.authMe()
+        this.authenticated = true
+        await this.refreshAll()
+      } catch (e) {
+        this.authenticated = false
+        const saved = this.loadSavedCredentials()
+        if (saved) {
+          this.loginForm.username = saved.username
+          this.loginForm.password = saved.password
+          await this.submitLogin()
+        }
+      } finally {
+        this.authReady = true
+      }
+    },
+    async submitLogin () {
+      if (this.loginLoading) return
+      this.loginLoading = true
+      this.loginError = ''
+      try {
+        await api.login(this.loginForm)
+        this.saveCredentials()
+        this.authenticated = true
+        this.loginForm.password = ''
+        await this.refreshAll()
+      } catch (e) {
+        this.authenticated = false
+        this.loginError = e && e.response && e.response.data && e.response.data.message ? e.response.data.message : '登录失败，请检查用户名和密码'
+      } finally {
+        this.loginLoading = false
+        this.authReady = true
+      }
+    },
+    loadSavedCredentials () {
+      try {
+        const value = localStorage.getItem('codex-web-login')
+        if (!value) return null
+        const saved = JSON.parse(value)
+        return saved && saved.username && saved.password ? saved : null
+      } catch (e) {
+        return null
+      }
+    },
+    saveCredentials () {
+      try {
+        localStorage.setItem('codex-web-login', JSON.stringify({ username: this.loginForm.username, password: this.loginForm.password }))
+      } catch (e) {}
+    },
+    async logout () {
+      try { await api.logout() } catch (e) {}
+      this.closeSocket()
+      this.stopStatusPolling()
+      this.authenticated = false
+      this.currentProject = null
+      this.currentSession = null
+      this.projects = []
+      this.sessions = []
+      this.messages = []
+    },
+    async refreshAll () { try { const [projects, runtime, settings] = await Promise.all([api.projects(), api.runtime(), api.settings()]); this.projects = projects.data; this.runtime = runtime.data; this.settings = settings.data; if (this.currentProject) { const found = this.projects.find(p => p.id === this.currentProject.id); if (found) await this.selectProject(found) } else if (this.projects.length) await this.selectProject(this.projects[0]) } catch (e) { this.notifyError(e) } },
     async selectProject (project) { this.stopStatusPolling(); this.closeSocket(); this.currentProject = project; this.currentSession = null; this.messages = []; this.sessions = []; this.leftCollapsed = true; try { const result = await api.sessions(project.id); this.sessions = result.data; await Promise.all([this.refreshGit(), this.loadFiles()]); if (this.sessions.length) await this.selectSession(this.visibleSessions[0] || this.sessions[0]) } catch (e) { this.notifyError(e) } },
     async selectSession (session) { this.stopStatusPolling(); this.currentSession = session; this.errorMessage = ''; this.messages = []; this.activities = []; this.liveStatus = ''; this.diffText = ''; this.selectedFile = ''; this.fileContent = null; this.seenEventIds = {}; this.leftCollapsed = true; try { const result = await api.events(session.id); result.data.forEach(event => this.applyEvent(event, true)); this.running = session.status === 'RUNNING' || session.status === 'WAITING_APPROVAL'; if (this.running && !this.liveStatus) this.liveStatus = session.status === 'WAITING_APPROVAL' ? '等待审批' : '正在思考'; this.connectSocket(session.id); this.startStatusPolling(session.id); this.$nextTick(this.scrollToBottom) } catch (e) { this.notifyError(e) } },
     async createSession () { if (!this.currentProject) return; try { const result = await api.createSession(this.currentProject.id, { title: '新建会话' }); this.sessions.unshift(result.data); await this.selectSession(result.data) } catch (e) { this.notifyError(e) } },
     async renameSession () { const title = await this.ask('会话名称', this.currentSession.title); if (title) { const result = await api.updateSession(this.currentSession.id, { title }); this.currentSession = result.data; const index = this.sessions.findIndex(s => s.id === result.data.id); if (index >= 0) this.$set(this.sessions, index, result.data) } },
     async toggleArchive () { try { const result = this.currentSession.archived ? await api.unarchive(this.currentSession.id) : await api.archive(this.currentSession.id); this.currentSession = result.data; const index = this.sessions.findIndex(s => s.id === result.data.id); if (index >= 0) this.$set(this.sessions, index, result.data) } catch (e) { this.notifyError(e) } },
     async exportSession () { try { const result = await api.exportSession(this.currentSession.id); const blob = new Blob([JSON.stringify(result.data, null, 2)], { type: 'application/json' }); const url = URL.createObjectURL(blob); const link = document.createElement('a'); link.href = url; link.download = `${this.currentSession.title || 'session'}.json`; link.click(); URL.revokeObjectURL(url) } catch (e) { this.notifyError(e) } },
+    handleComposerKeydown (event) {
+      if (event.key === 'Enter' && !event.ctrlKey && !event.metaKey && !event.shiftKey) {
+        event.preventDefault()
+        this.sendMessage()
+      }
+    },
     async sendMessage () {
-      if (!this.currentSession || !this.draft.trim() || this.running) return
+      if (!this.currentSession || !this.draft.trim() || this.sending) return
+      const steering = this.running
       const text = this.draft.trim()
       const attachments = this.attachments.map(item => item.path)
       this.draft = ''
@@ -113,7 +217,12 @@ export default {
       this.messages.push({ id: `user-${Date.now()}`, role: 'user', text, timestamp: new Date().toISOString() })
       this.$nextTick(this.scrollToBottom)
       try {
-        await api.startTurn(this.currentSession.id, { text, attachments })
+        const result = await (steering ? api.steerTurn(this.currentSession.id, { text, attachments }) : api.startTurn(this.currentSession.id, { text, attachments }))
+        if (result && result.data) {
+          this.currentSession = result.data
+          const index = this.sessions.findIndex(item => item.id === result.data.id)
+          if (index >= 0) this.$set(this.sessions, index, result.data)
+        }
         this.startStatusPolling(this.currentSession.id)
       } catch (e) {
         this.running = false
@@ -158,12 +267,32 @@ export default {
     async toggleDirectory (item) { if (item.expanded) { this.fileItems = this.fileItems.filter(child => !(child.path !== item.path && child.path.startsWith(`${item.path}/`))); item.expanded = false; return } try { const result = await api.files(this.currentProject.id, item.path); const children = result.data.map(child => ({ ...child, depth: item.depth + 1, expanded: false })); const index = this.fileItems.indexOf(item); this.fileItems.splice(index + 1, 0, ...children); item.expanded = true } catch (e) { this.notifyError(e) } },
     async openFile (path) { try { const result = await api.content(this.currentProject.id, path); this.fileContent = result.data; this.activeTab = 'files' } catch (e) { this.notifyError(e) } },
     openWorkspacePicker () { this.workspaceDialog = true; this.selectedWorkspace = ''; api.roots().then(result => { this.workspaceRoots = result.data; if (this.workspaceRoots[0]) this.browse(this.workspaceRoots[0].path) }).catch(e => this.notifyError(e)) },
-    async browse (path) { try { const result = await api.browse(path); this.workspacePath = path; this.workspaceItems = result.data; const parts = path.replace(/\\/g, '/').split('/'); this.workspaceParent = parts.length > 1 ? parts.slice(0, -1).join('/') || `${parts[0]}/` : '' ; this.selectedWorkspace = path } catch (e) { this.notifyError(e) } },
+    async browse (path) { try { const result = await api.browse(path); this.workspacePath = path; this.workspaceItems = result.data; const normalized = path.replace(/\\/g, '/').replace(/\/+$/, ''); this.workspaceParent = /^[A-Za-z]:$/.test(normalized) || normalized === '' ? '' : normalized.slice(0, normalized.lastIndexOf('/')) || '/' ; this.selectedWorkspace = path } catch (e) { this.notifyError(e) } },
     async confirmWorkspace () { try { const result = await api.createProject({ path: this.selectedWorkspace }); this.projects = this.projects.filter(p => p.id !== result.data.id); this.projects.unshift(result.data); this.workspaceDialog = false; await this.selectProject(result.data) } catch (e) { this.notifyError(e) } },
     async createFolder () { const name = await this.ask('新建目录', 'new-project'); if (!name) return; try { const result = await api.createFolder({ parent: this.workspacePath, name }); await this.browse(this.workspacePath); this.selectedWorkspace = result.data.path } catch (e) { this.notifyError(e) } },
     async uploadFiles (event) { const files = Array.from(event.target.files || []); for (const file of files) { try { const result = await api.upload(this.currentSession.id, file); this.attachments.push(result.data) } catch (e) { this.notifyError(e) } } event.target.value = '' },
     async editProject (project) { const name = await this.ask('项目名称', project.name); if (name) { const result = await api.updateProject(project.id, { name }); this.projects = this.projects.map(item => item.id === project.id ? result.data : item); if (this.currentProject && this.currentProject.id === project.id) this.currentProject = result.data } },
-    async runtimeAction () { try { if (this.runtime.running) this.runtime = (await api.runtimeStop()).data; else this.runtime = (await api.runtimeStart()).data } catch (e) { this.notifyError(e) } },
+    async deleteProject (project) {
+      try {
+        await this.$confirm(`确定删除项目“${project.name}”吗？这会移除项目记录和本地会话记录，但不会删除工作空间文件。`, '删除项目', { confirmButtonText: '删除', cancelButtonText: '取消', type: 'warning' })
+        const selected = this.currentProject && this.currentProject.id === project.id
+        if (selected) { this.stopStatusPolling(); this.closeSocket() }
+        await api.deleteProject(project.id)
+        this.projects = this.projects.filter(item => item.id !== project.id)
+        if (selected) {
+          this.currentProject = null
+          this.currentSession = null
+          this.sessions = []
+          this.messages = []
+          if (this.projects.length) await this.selectProject(this.projects[0])
+        }
+      } catch (e) {
+        if (e !== 'cancel' && e !== 'close') this.notifyError(e)
+      }
+    },
+     openSettings () { this.settingsDialog = true },
+     async saveSettings () { this.settingsSaving = true; try { this.settings = (await api.updateSettings(this.settings)).data; this.settingsDialog = false; this.$message.success('设置已保存，新建会话时生效') } catch (e) { this.notifyError(e) } finally { this.settingsSaving = false } },
+      async runtimeAction () { if (this.runtimeBusy) return; this.runtimeBusy = true; try { this.runtime = (await (this.runtime.running ? api.runtimeStop() : api.runtimeStart())).data } catch (e) { this.notifyError(e) } finally { this.runtimeBusy = false } },
     async ask (title, value) { return new Promise(resolve => { this.$prompt('', title, { inputValue: value, confirmButtonText: '确定', cancelButtonText: '取消', inputPattern: /\S+/, inputErrorMessage: '请输入内容' }).then(result => resolve(result.value)).catch(() => resolve('')) }) },
     statusClass (status) { return { running: 'running', waiting: 'waiting', failed: 'failed', completed: 'completed', archived: 'archived' }[(status || '').toLowerCase()] || 'idle' },
     statusText (status) { return { CREATED: '等待发送任务', IDLE: '空闲', RUNNING: '正在运行', WAITING_APPROVAL: '等待审批', COMPLETED: '已完成', FAILED: '运行失败', CANCELLED: '已停止', ARCHIVED: '已归档' }[status] || status },
@@ -172,6 +301,7 @@ export default {
     renderMarkdown (text) { return DOMPurify.sanitize(marked.parse(text || '', { headerIds: false, mangle: false })) },
     scrollToBottom () { const box = this.$refs.messageScroll; if (box) box.scrollTop = box.scrollHeight },
     async respondApproval (decision) { try { await api.respondApproval(this.currentSession.id, { requestId: this.approvalRequestId, decision }) } catch (e) { this.notifyError(e) } finally { this.approvalDialog = false; this.approvalRequestId = null } },
+    setThinkingOpen (group, event) { const open = event.target.open; (group.sourceIds || []).forEach(id => { const message = this.messages.find(item => item.id === id); if (message) this.$set(message, 'thinkingOpen', open) }) },
     notifyError (error) { const message = error && error.response && error.response.data ? error.response.data.message : (error.message || '请求失败'); this.$message.error(message) }
     ,applyEvent (event, replay) {
       if (!event) return
@@ -189,19 +319,28 @@ export default {
         this.liveStatus = '正在思考'
       } else if (type === 'agent.message.delta') {
         const text = data.text || ''
+        const payload = data.payload || {}
+        const itemId = data.itemId || payload.itemId || (payload.item && payload.item.id) || ''
+        const phase = data.phase || (payload.item && payload.item.phase) || this.itemPhases[itemId] || 'commentary'
         let last = this.messages[this.messages.length - 1]
-        if (!last || last.role !== 'assistant' || !last.streaming) {
-          last = { id: `assistant-${Date.now()}-${Math.random()}`, role: 'assistant', text: '', timestamp, streaming: true }
+        if (!last || last.role !== 'assistant' || !last.streaming || (itemId && last.itemId && last.itemId !== itemId)) {
+          last = { id: `assistant-${itemId || Date.now()}-${Math.random()}`, role: 'assistant', text: '', timestamp, streaming: true, itemId, phase, thinkingOpen: phase !== 'final_answer' }
           this.messages.push(last)
         }
+        if (!last.itemId && itemId) this.$set(last, 'itemId', itemId)
+        if (!last.phase && phase) this.$set(last, 'phase', phase)
+        if (phase !== 'final_answer') this.$set(last, 'thinkingOpen', true)
+        if (phase === 'final_answer') this.messages.forEach(message => { if (message.role === 'assistant' && message.phase !== 'final_answer') this.$set(message, 'thinkingOpen', false) })
         last.text += text
         last.streaming = true
         this.running = true
         this.errorMessage = ''
         this.liveStatus = '正在整理回复'
       } else if (type === 'turn.completed') {
-        const last = this.messages[this.messages.length - 1]
-        if (last && last.role === 'assistant') last.streaming = false
+        this.messages.forEach(message => {
+          if (message.role === 'assistant' && message.streaming) message.streaming = false
+          if (message.role === 'assistant' && message.phase !== 'final_answer') this.$set(message, 'thinkingOpen', false)
+        })
         this.running = false
         this.errorMessage = ''
         this.liveStatus = ''
@@ -213,7 +352,18 @@ export default {
         this.liveStatus = '正在重新连接 Codex'
       } else if (type === 'tool.call.started' || type === 'tool.call.output' || type === 'tool.call.completed') {
         const detail = data.text || (data.payload && (data.payload.command || data.payload.output)) || ''
-        const rawId = data.payload && (data.payload.itemId || data.payload.callId)
+        const payload = data.payload || {}
+        const item = payload.item || {}
+        const rawId = data.itemId || payload.itemId || item.id || payload.callId
+        const phase = data.phase || item.phase || ''
+        if (item.type === 'agentMessage' && rawId && phase) {
+          this.$set(this.itemPhases, rawId, phase)
+          const message = this.messages.find(entry => entry.itemId === rawId)
+          if (message) {
+            this.$set(message, 'phase', phase)
+            if (phase !== 'final_answer') this.$set(message, 'thinkingOpen', true)
+          }
+        }
         const existing = rawId && this.activities.find(activity => activity.rawId === rawId)
         if (existing) {
           existing.detail = String(detail)

@@ -37,7 +37,7 @@ public class WorkspaceService {
         Path parent = guard.requireDirectory(rawParent);
         if (name == null || !name.matches("[a-zA-Z0-9._-]+")) throw new ApiException(HttpStatus.BAD_REQUEST, "INVALID_DIRECTORY_NAME", "目录名只允许字母、数字、点、下划线和短横线");
         Path target = parent.resolve(name).normalize();
-        if (!guard.isAllowed(target) || Files.exists(target)) throw new ApiException(HttpStatus.CONFLICT, "DIRECTORY_UNAVAILABLE", "目录已存在或不在允许范围内");
+        if (Files.exists(target)) throw new ApiException(HttpStatus.CONFLICT, "DIRECTORY_UNAVAILABLE", "目录已存在");
         try { Files.createDirectory(target); return target; }
         catch (IOException exception) { throw new ApiException(HttpStatus.INTERNAL_SERVER_ERROR, "DIRECTORY_CREATE_FAILED", "无法创建目录"); }
     }
