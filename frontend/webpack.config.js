@@ -12,7 +12,7 @@ module.exports = {
     { test: /.css$/, use: ['style-loader', 'css-loader'] }
   ]},
   plugins: [new VueLoaderPlugin(), new HtmlWebpackPlugin({ template: './public/index.html' })],
-  devServer: { host: '127.0.0.1', port: 9000, allowedHosts: 'all', historyApiFallback: true, client: { webSocketURL: { pathname: '/_webpack_hmr' } }, webSocketServer: { type: 'ws', options: { path: '/_webpack_hmr' } }, proxy: [
+  devServer: { host: '0.0.0.0', port: 9000, allowedHosts: 'all', historyApiFallback: true, client: { webSocketURL: { pathname: '/_webpack_hmr' } }, webSocketServer: { type: 'ws', options: { path: '/_webpack_hmr' } }, proxy: [
     { context: ['/api'], target: 'http://127.0.0.1:8090', changeOrigin: true, ws: false, timeout: 0, proxyTimeout: 0 }
   ] }
 }
