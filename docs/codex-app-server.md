@@ -19,6 +19,7 @@ codex.cmd app-server generate-json-schema --experimental --out .tmp/app-server-s
 
 - `initialize`：声明 `codex-web` 客户端能力。
 - `thread/start`：使用选中的工作空间目录创建 Codex 线程，模型、审批策略和沙箱策略由工作台设置传入，默认模型跟随 Codex 配置，默认权限是 `on-request` + `workspaceWrite`。
+- `thread/resume`：按已保存的 `threadId` 从 Codex 磁盘记录恢复线程上下文，用于 app-server 重启后的会话继续执行。
 - `turn/start`：向线程发送文本任务，推理级别通过 `effort` 传入，可选 `low`、`medium`、`high`、`xhigh`，留空时跟随 Codex 配置。
 - `turn/steer`：向当前正在运行的 turn 注入用户引导，支持思考过程中追加消息；普通发送会进入会话队列，当前 turn 结束后按顺序执行。
 - `turn/interrupt`：按 `threadId` 和 `turnId` 停止任务。

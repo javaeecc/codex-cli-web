@@ -6,6 +6,7 @@ import cn.codexweb.model.Session;
 import cn.codexweb.model.StoredEvent;
 import cn.codexweb.model.AppSettings;
 import cn.codexweb.model.QueuedTurn;
+import cn.codexweb.model.SessionHistory;
 import cn.codexweb.storage.ProjectStore;
 import cn.codexweb.storage.AppSettingsStore;
 import cn.codexweb.storage.SessionStore;
@@ -45,9 +46,11 @@ public class CodexSessionService implements CodexProtocolClient.Listener {
     private final Map<String, Long> pendingThreadStarts = new ConcurrentHashMap<String, Long>();
     private final Map<String, PendingTurn> pendingTurns = new ConcurrentHashMap<String, PendingTurn>();
     private final Map<String, Long> turnRequestsSent = new ConcurrentHashMap<String, Long>();
+    private final Map<String, Long> threadRecoveryAttempts = new ConcurrentHashMap<String, Long>();
     private final Map<String, QueuedTurn> activeQueuedTurns = new ConcurrentHashMap<String, QueuedTurn>();
     private final Map<String, Long> lastProgress = new ConcurrentHashMap<String, Long>();
     private final Map<String, Object> sessionLocks = new ConcurrentHashMap<String, Object>();
+    private final Map<String, HistoryCacheEntry> historyCache = new ConcurrentHashMap<String, HistoryCacheEntry>();
     private final ExecutorService notificationExecutor = Executors.newSingleThreadExecutor(r -> {
         Thread thread = new Thread(r, "codex-event-handler");
         thread.setDaemon(true);
@@ -65,6 +68,16 @@ public class CodexSessionService implements CodexProtocolClient.Listener {
             this.text = text;
             this.attachments = attachments;
             this.queuedTurn = queuedTurn;
+        }
+    }
+
+    private static final class HistoryCacheEntry {
+        private final String version;
+        private final SessionHistory history;
+
+        private HistoryCacheEntry(String version, SessionHistory history) {
+            this.version = version;
+            this.history = history;
         }
     }
 
@@ -97,6 +110,159 @@ public class CodexSessionService implements CodexProtocolClient.Listener {
     public List<StoredEvent> events(String sessionId) { return events(sessionId, null); }
     public List<StoredEvent> events(String sessionId, String afterEventId) { requireSession(sessionId); return afterEventId == null ? sessions.events(sessionId) : sessions.eventsAfter(sessionId, afterEventId); }
 
+    public SessionHistory history(String sessionId) {
+        requireSession(sessionId);
+        String version = sessions.eventsVersion(sessionId);
+        HistoryCacheEntry cached = historyCache.get(sessionId);
+        if (cached != null && cached.version.equals(version)) return cached.history;
+        List<StoredEvent> source = sessions.events(sessionId);
+        SessionHistory result = new SessionHistory();
+        result.sourceEventCount = source.size();
+        if (!source.isEmpty()) result.lastEventId = source.get(source.size() - 1).id;
+        result.events = compactHistory(source);
+        if (version.equals(sessions.eventsVersion(sessionId))) historyCache.put(sessionId, new HistoryCacheEntry(version, result));
+        log.info("会话展示历史聚合: sessionId={}, sourceEvents={}, displayEvents={}", sessionId, source.size(), result.events.size());
+        return result;
+    }
+
+    private List<StoredEvent> compactHistory(List<StoredEvent> source) {
+        List<StoredEvent> result = new java.util.ArrayList<StoredEvent>();
+        Map<String, StoredEvent> compacted = new LinkedHashMap<String, StoredEvent>();
+        StoredEvent latestDiff = null;
+        for (StoredEvent event : source) {
+            if (event == null || event.type == null) continue;
+            if ("agent.message.delta".equals(event.type)) {
+                String itemId = eventValue(event, "itemId");
+                String phase = eventValue(event, "phase");
+                String turnId = eventValue(event, "turnId");
+                String key = "message:" + (itemId == null ? (turnId == null ? "unknown" : turnId) : itemId) + ":" + (phase == null ? "commentary" : phase);
+                StoredEvent target = compacted.get(key);
+                if (target == null) {
+                    target = compactEvent(event);
+                    target.data = new LinkedHashMap<String, Object>();
+                    copyValue(event.data, target.data, "itemId");
+                    copyValue(event.data, target.data, "phase");
+                    target.data.put("text", "");
+                    compacted.put(key, target);
+                    result.add(target);
+                }
+                appendText(target, eventValue(event, "text"));
+                target.id = event.id;
+                target.timestamp = event.timestamp;
+                continue;
+            }
+            if ("tool.call.started".equals(event.type) || "tool.call.output".equals(event.type) || "tool.call.completed".equals(event.type)) {
+                Map<String, Object> eventPayload = mapValue(event.data, "payload");
+                Map<String, Object> eventItem = eventPayload == null ? null : mapValue(eventPayload, "item");
+                if (eventItem == null || !"agentMessage".equals(String.valueOf(eventItem.get("type")))) continue;
+                String rawId = eventValue(event, "itemId");
+                if (rawId == null) rawId = eventValue(event, "callId");
+                String key = "tool:" + event.type + ":" + (rawId == null ? event.id : rawId);
+                StoredEvent target = compacted.get(key);
+                if (target == null) {
+                    target = compactEvent(event);
+                    target.data = compactToolData(event);
+                    compacted.put(key, target);
+                    result.add(target);
+                } else {
+                    target.id = event.id;
+                    target.timestamp = event.timestamp;
+                    target.data = compactToolData(event);
+                }
+                continue;
+            }
+            if ("diff.updated".equals(event.type)) {
+                if (latestDiff == null) {
+                    latestDiff = compactEvent(event);
+                    latestDiff.data = compactDiffData(event);
+                    result.add(latestDiff);
+                } else {
+                    latestDiff.id = event.id;
+                    latestDiff.timestamp = event.timestamp;
+                    latestDiff.data = compactDiffData(event);
+                }
+                continue;
+            }
+            result.add(compactEvent(event));
+        }
+        return result;
+    }
+
+    private StoredEvent compactEvent(StoredEvent source) {
+        StoredEvent result = new StoredEvent();
+        result.id = source.id;
+        result.type = source.type;
+        result.sessionId = source.sessionId;
+        result.timestamp = source.timestamp;
+        result.data = source.data == null ? new LinkedHashMap<String, Object>() : new LinkedHashMap<String, Object>(source.data);
+        return result;
+    }
+
+    private Map<String, Object> compactToolData(StoredEvent event) {
+        Map<String, Object> data = new LinkedHashMap<String, Object>();
+        copyValue(event.data, data, "text");
+        copyValue(event.data, data, "itemId");
+        copyValue(event.data, data, "phase");
+        Map<String, Object> payload = mapValue(event.data, "payload");
+        if (payload != null) {
+            Map<String, Object> compactPayload = new LinkedHashMap<String, Object>();
+            copyValue(payload, compactPayload, "itemId");
+            copyValue(payload, compactPayload, "callId");
+            Map<String, Object> item = mapValue(payload, "item");
+            if (item != null) {
+                Map<String, Object> compactItem = new LinkedHashMap<String, Object>();
+                copyValue(item, compactItem, "id");
+                copyValue(item, compactItem, "type");
+                copyValue(item, compactItem, "phase");
+                compactPayload.put("item", compactItem);
+            }
+            data.put("payload", compactPayload);
+        }
+        return data;
+    }
+
+    private Map<String, Object> compactDiffData(StoredEvent event) {
+        Map<String, Object> data = new LinkedHashMap<String, Object>();
+        Map<String, Object> payload = mapValue(event.data, "payload");
+        if (payload != null) {
+            Map<String, Object> compactPayload = new LinkedHashMap<String, Object>();
+            copyValue(payload, compactPayload, "diff");
+            data.put("payload", compactPayload);
+        }
+        copyValue(event.data, data, "text");
+        return data;
+    }
+
+    private void appendText(StoredEvent event, String text) {
+        if (text == null || text.isEmpty()) return;
+        String current = event.data == null ? "" : String.valueOf(event.data.get("text"));
+        event.data.put("text", current + text);
+    }
+
+    private String eventValue(StoredEvent event, String key) {
+        if (event == null || event.data == null) return null;
+        Object direct = event.data.get(key);
+        if (direct != null) return String.valueOf(direct);
+        Map<String, Object> payload = mapValue(event.data, "payload");
+        if (payload == null) return null;
+        Object nested = payload.get(key);
+        if (nested != null) return String.valueOf(nested);
+        Map<String, Object> item = mapValue(payload, "item");
+        Object itemValue = item == null ? null : item.get(key);
+        return itemValue == null ? null : String.valueOf(itemValue);
+    }
+
+    @SuppressWarnings("unchecked")
+    private Map<String, Object> mapValue(Map<String, Object> source, String key) {
+        if (source == null) return null;
+        Object value = source.get(key);
+        return value instanceof Map ? (Map<String, Object>) value : null;
+    }
+
+    private void copyValue(Map<String, Object> source, Map<String, Object> target, String key) {
+        if (source != null && source.containsKey(key)) target.put(key, source.get(key));
+    }
+
     public synchronized void startTurn(String sessionId, String text) {
         startTurn(sessionId, text, java.util.Collections.<String>emptyList());
     }
@@ -109,6 +275,7 @@ public class CodexSessionService implements CodexProtocolClient.Listener {
             if (isTerminal(session.status)) scheduleNextQueuedTurn(session);
             return;
         }
+        threadRecoveryAttempts.remove(session.id);
         startTurnNow(session, text, attachments, null);
     }
 
@@ -142,7 +309,7 @@ public class CodexSessionService implements CodexProtocolClient.Listener {
                         .whenComplete((response, failure) -> finishThreadStart(session.id, generation, text, safeAttachments, queuedTurn, response, failure));
             } else {
                 client.startTurnAsync(session.codexThreadId, text, safeAttachments, appSettings.get().reasoningEffort)
-                        .whenComplete((response, failure) -> finishTurnRequest(session.id, generation, queuedTurn, response, failure));
+                        .whenComplete((response, failure) -> finishTurnRequest(session.id, generation, queuedTurn, safeAttachments, response, failure));
             }
         } catch (RuntimeException exception) {
             failStart(session, exception.getMessage(), queuedTurn);
@@ -197,13 +364,13 @@ public class CodexSessionService implements CodexProtocolClient.Listener {
             if (client == null) throw new IllegalStateException("Codex 运行时已停止");
             turnRequestsSent.put(session.id, generation);
             client.startTurnAsync(session.codexThreadId, text, attachments, appSettings.get().reasoningEffort)
-                    .whenComplete((result, failure) -> finishTurnRequest(session.id, generation, queuedTurn, result, failure));
+                    .whenComplete((result, failure) -> finishTurnRequest(session.id, generation, queuedTurn, attachments, result, failure));
         } catch (RuntimeException exception) {
             failStart(session, exception.getMessage(), queuedTurn);
         }
     }
 
-    private void finishTurnRequest(String sessionId, long generation, QueuedTurn queuedTurn, JsonNode response, Throwable failure) {
+    private void finishTurnRequest(String sessionId, long generation, QueuedTurn queuedTurn, java.util.List<String> attachments, JsonNode response, Throwable failure) {
         synchronized (this) {
             Session session = sessions.find(sessionId);
             if (session == null || session.turnGeneration != generation || session.cancelRequested) return;
@@ -223,9 +390,52 @@ public class CodexSessionService implements CodexProtocolClient.Listener {
                 log.warn("turn/start 响应超时，继续依赖通知事件判断回合状态: sessionId={}, threadId={}, turnId={}", sessionId, session.codexThreadId, session.currentTurnId);
                 return;
             }
+            if (isMissingThread(failure) && threadRecoveryAttempts.putIfAbsent(sessionId, generation) == null) {
+                String staleThreadId = session.codexThreadId;
+                log.warn("Codex 线程未加载，尝试恢复原线程上下文: sessionId={}, threadId={}, generation={}", sessionId, staleThreadId, generation);
+                resumeOrStartNewThread(session, generation, queuedTurn, attachments, staleThreadId);
+                return;
+            }
             log.error("turn/start 失败: sessionId={}, threadId={}, turnId={}", sessionId, session.codexThreadId, session.currentTurnId, failure);
             failStart(session, failure.getMessage(), queuedTurn);
         }
+    }
+
+    private void resumeOrStartNewThread(Session session, long generation, QueuedTurn queuedTurn, java.util.List<String> attachments, String threadId) {
+        if (threadId == null || processManager.client() == null) {
+            startNewThread(session, generation, queuedTurn, attachments, threadId, null);
+            return;
+        }
+        processManager.client().resumeThreadAsync(threadId).whenComplete((response, failure) -> {
+            synchronized (this) {
+                Session latest = sessions.find(session.id);
+                if (latest == null || latest.turnGeneration != generation || !"RUNNING".equals(latest.status) || latest.cancelRequested) return;
+                boolean resumed = failure == null && response != null && response.get("thread") != null;
+                if (resumed) {
+                    latest.codexThreadId = threadId;
+                    latest.steeringAvailable = true;
+                    threadSessions.put(threadId, latest.id);
+                    sessions.save(latest);
+                    log.info("Codex 线程已恢复，保留原上下文: sessionId={}, threadId={}, generation={}", latest.id, threadId, generation);
+                    sendTurn(latest, generation, latest.lastUserMessage, attachments, queuedTurn);
+                    return;
+                }
+                startNewThread(latest, generation, queuedTurn, attachments, threadId, failure);
+            }
+        });
+    }
+
+    private void startNewThread(Session session, long generation, QueuedTurn queuedTurn, java.util.List<String> attachments, String staleThreadId, Throwable resumeFailure) {
+        if (staleThreadId != null) threadSessions.remove(staleThreadId, session.id);
+        session.codexThreadId = null;
+        session.currentTurnId = null;
+        session.steeringAvailable = false;
+        pendingThreadStarts.remove(session.id);
+        pendingTurns.remove(session.id);
+        turnRequestsSent.remove(session.id);
+        sessions.save(session);
+        if (resumeFailure != null) log.warn("Codex 线程恢复失败，降级创建新线程: sessionId={}, staleThreadId={}, message={}", session.id, staleThreadId, resumeFailure.getMessage());
+        startTurnNow(session, session.lastUserMessage, attachments, queuedTurn);
     }
 
     private void failStart(Session session, String message, QueuedTurn queuedTurn) {
@@ -516,6 +726,7 @@ public class CodexSessionService implements CodexProtocolClient.Listener {
             lastProgress.remove(session.id);
             turnRequestsSent.remove(session.id);
             activeQueuedTurns.remove(session.id);
+            threadRecoveryAttempts.remove(session.id);
         }
         if (normalized.equals("error")) {
             session.currentTurnId = null;
@@ -525,6 +736,7 @@ public class CodexSessionService implements CodexProtocolClient.Listener {
             lastProgress.remove(session.id);
             turnRequestsSent.remove(session.id);
             QueuedTurn activeQueued = activeQueuedTurns.remove(session.id);
+            threadRecoveryAttempts.remove(session.id);
             if (activeQueued != null) restoreQueuedTurn(session, activeQueued);
         }
         append(session, normalized, data);
@@ -656,6 +868,18 @@ public class CodexSessionService implements CodexProtocolClient.Listener {
         Throwable current = failure;
         while (current != null) {
             if (current instanceof java.util.concurrent.TimeoutException) return true;
+            current = current.getCause();
+        }
+        return false;
+    }
+    private boolean isMissingThread(Throwable failure) {
+        Throwable current = failure;
+        while (current != null) {
+            String message = current.getMessage();
+            if (message != null) {
+                String normalized = message.toLowerCase(java.util.Locale.ROOT);
+                if (normalized.contains("thread not found") || normalized.contains("thread_not_found")) return true;
+            }
             current = current.getCause();
         }
         return false;

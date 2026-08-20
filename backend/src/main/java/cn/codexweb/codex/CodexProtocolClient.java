@@ -118,6 +118,12 @@ public class CodexProtocolClient {
         return requestAsync("thread/start", threadParams(cwd, approvalPolicy, model));
     }
 
+    public CompletableFuture<JsonNode> resumeThreadAsync(String threadId) {
+        Map<String, Object> params = new HashMap<String, Object>();
+        params.put("threadId", threadId);
+        return requestAsync("thread/resume", params);
+    }
+
     private Map<String, Object> threadParams(String cwd, String approvalPolicy, String model) {
         Map<String, Object> params = new HashMap<String, Object>();
         params.put("cwd", cwd);

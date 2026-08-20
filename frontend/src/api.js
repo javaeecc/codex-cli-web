@@ -23,6 +23,7 @@ export default {
   createSession: (projectId, payload) => client.post(`/projects/${projectId}/sessions`, payload),
   session: id => client.get(`/sessions/${id}`),
   events: (id, afterEventId) => client.get(`/sessions/${id}/events`, { params: afterEventId ? { after: afterEventId } : {} }),
+  history: (id, config) => client.get(`/sessions/${id}/history`, config),
   streamUrl: id => { const token = new URLSearchParams(location.search).get('token'); return `/api/sessions/${encodeURIComponent(id)}/stream${token ? `?token=${encodeURIComponent(token)}` : ''}` },
   startTurn: (id, payload) => client.post(`/sessions/${id}/turns`, payload),
   steerTurn: (id, payload) => client.post(`/sessions/${id}/steer`, payload),

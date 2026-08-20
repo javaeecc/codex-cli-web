@@ -8,6 +8,8 @@ import org.springframework.stereotype.Service;
 
 import javax.annotation.PostConstruct;
 import java.io.IOException;
+import java.io.ByteArrayOutputStream;
+import java.io.RandomAccessFile;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -100,6 +102,16 @@ public class SessionStore {
         }
     }
 
+    public String eventsVersion(String sessionId) {
+        Path path = eventsPath(sessionId);
+        if (!Files.exists(path)) return "0";
+        try {
+            return Files.size(path) + ":" + Files.getLastModifiedTime(path).toMillis();
+        } catch (IOException exception) {
+            return "unknown:" + path.toString();
+        }
+    }
+
     public List<StoredEvent> eventsAfter(String sessionId, String afterEventId) {
         if (afterEventId == null || afterEventId.trim().isEmpty()) return events(sessionId);
         Path path = eventsPath(sessionId);
@@ -107,6 +119,7 @@ public class SessionStore {
         long started = System.nanoTime();
         boolean found = false;
         try {
+            if (afterEventId.equals(lastEventId(path))) return new ArrayList<StoredEvent>();
             List<StoredEvent> result = new ArrayList<StoredEvent>();
             for (String line : Files.readAllLines(path, StandardCharsets.UTF_8)) {
                 if (line.trim().isEmpty()) continue;
@@ -127,6 +140,25 @@ public class SessionStore {
         } catch (IOException exception) {
             log.error("读取会话事件增量失败: sessionId={}, afterEventId={}, path={}", sessionId, afterEventId, path, exception);
             throw new IllegalStateException(exception);
+        }
+    }
+
+    private String lastEventId(Path path) throws IOException {
+        try (RandomAccessFile file = new RandomAccessFile(path.toFile(), "r")) {
+            long position = file.length() - 1;
+            ByteArrayOutputStream reversed = new ByteArrayOutputStream();
+            while (position >= 0) {
+                file.seek(position--);
+                int value = file.read();
+                if (value == '\n' && reversed.size() > 0) break;
+                if (value != '\r') reversed.write(value);
+            }
+            byte[] bytes = reversed.toByteArray();
+            for (int left = 0, right = bytes.length - 1; left < right; left++, right--) {
+                byte value = bytes[left]; bytes[left] = bytes[right]; bytes[right] = value;
+            }
+            com.fasterxml.jackson.databind.JsonNode node = files.mapper().readTree(new String(bytes, StandardCharsets.UTF_8));
+            return node == null || !node.has("id") ? null : node.get("id").asText();
         }
     }
 
