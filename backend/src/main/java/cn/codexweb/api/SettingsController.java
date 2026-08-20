@@ -22,7 +22,10 @@ public class SettingsController {
     public AppSettings update(@RequestBody Map<String, Object> body) {
         String policy = body == null || body.get("approvalPolicy") == null
                 ? null : String.valueOf(body.get("approvalPolicy"));
-        try { return settings.update(policy); }
+        String model = body == null || body.get("model") == null ? null : String.valueOf(body.get("model"));
+        String reasoningEffort = body == null || body.get("reasoningEffort") == null
+                ? null : String.valueOf(body.get("reasoningEffort"));
+        try { return settings.update(policy, model, reasoningEffort); }
         catch (IllegalArgumentException exception) {
             throw new ApiException(org.springframework.http.HttpStatus.BAD_REQUEST, "INVALID_SETTINGS", exception.getMessage());
         }

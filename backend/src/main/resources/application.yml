@@ -7,6 +7,18 @@ server:
   error:
     include-message: never
 
+logging:
+  file:
+    name: ${CODEX_WEB_LOG_FILE:../data/logs/codex-web.log}
+  logback:
+    rollingpolicy:
+      max-file-size: 20MB
+      max-history: 14
+      total-size-cap: 500MB
+  pattern:
+    console: "%d{yyyy-MM-dd HH:mm:ss.SSS} %-5level [%thread] %logger{36} - %msg%n"
+    file: "%d{yyyy-MM-dd HH:mm:ss.SSS} %-5level [%thread] %logger{36} - %msg%n"
+
 codex-web:
   data-dir: ${CODEX_WEB_DATA_DIR:../data}
   codex-command: ${CODEX_COMMAND:codex.cmd}

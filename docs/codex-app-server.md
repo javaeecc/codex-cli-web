@@ -18,9 +18,9 @@ codex.cmd app-server generate-json-schema --experimental --out .tmp/app-server-s
 ## 使用的方法
 
 - `initialize`：声明 `codex-web` 客户端能力。
-- `thread/start`：使用选中的工作空间目录创建 Codex 线程，审批策略和沙箱策略由工作台设置传入，默认是 `on-request` + `workspaceWrite`。
-- `turn/start`：向线程发送文本任务。
-- `turn/steer`：向当前正在运行的 turn 注入用户引导，支持思考过程中追加消息。
+- `thread/start`：使用选中的工作空间目录创建 Codex 线程，模型、审批策略和沙箱策略由工作台设置传入，默认模型跟随 Codex 配置，默认权限是 `on-request` + `workspaceWrite`。
+- `turn/start`：向线程发送文本任务，推理级别通过 `effort` 传入，可选 `low`、`medium`、`high`、`xhigh`，留空时跟随 Codex 配置。
+- `turn/steer`：向当前正在运行的 turn 注入用户引导，支持思考过程中追加消息；普通发送会进入会话队列，当前 turn 结束后按顺序执行。
 - `turn/interrupt`：按 `threadId` 和 `turnId` 停止任务。
 
 ## 事件规范化
@@ -40,6 +40,19 @@ codex.cmd app-server generate-json-schema --experimental --out .tmp/app-server-s
 | `error` | `error` |
 
 Reasoning 和隐藏思维链事件不会进入 JSONL，也不会发送到浏览器。
+
+## 故障排查日志
+
+后端日志默认写入 `data/logs/codex-web.log`，按 20 MB 滚动并保留 14 个历史文件。关键日志都包含 `sessionId`、`threadId`、`turnId` 或 JSON-RPC `requestId`，包括：
+
+- app-server 启停、初始化失败、stdio 读取结束和协议请求超时；
+- 无法匹配会话或无法识别的通知事件；
+- 回合启动、接受、重试、完成、失败和审批；
+- SSE 建连、心跳/事件发送失败；
+- 事件文件读取缓慢、增量游标失效和追加失败；
+- 回合超过 15 分钟没有进展时的自动失败恢复，以及排队任务回放。
+
+前端在浏览器控制台记录 SSE 断线和会话状态同步失败，正常状态同步不会再读取完整事件历史。
 
 ## 审批
 

@@ -60,7 +60,7 @@
 
       <main class="conversation panel-border">
         <div class="conversation-empty" v-if="!currentSession"><div class="empty-glyph">C</div><h2>准备开始</h2><p>选择一个工作空间，创建会话，然后把任务交给 Codex。</p><el-button type="primary" icon="el-icon-folder-opened" @click="openWorkspacePicker">选择工作空间</el-button></div>
-        <div class="message-scroll" ref="messageScroll" v-if="currentSession">
+        <div class="message-scroll" ref="messageScroll" v-if="currentSession" @scroll="handleMessageScroll">
           <div v-if="!messages.length" class="first-prompt"><span class="prompt-kicker">{{ currentProject ? currentProject.name : 'Codex' }}</span><h2>你想处理什么？</h2><p>可以从查看项目结构、解释代码或修改功能开始。</p></div>
           <div v-for="(message, index) in displayMessages" :key="message.id || index" class="message-block" :class="message.role">
             <details v-if="message.role === 'thinking'" class="thinking-block" :open="message.thinkingOpen" @toggle="setThinkingOpen(message, $event)"><summary><i class="el-icon-caret-right"></i><span>思考过程</span><span v-if="message.streaming" class="thinking-live">正在思考</span></summary><div class="thinking-content markdown-body" v-html="renderMarkdown(message.text)"></div></details>
@@ -73,7 +73,8 @@
           <div v-if="errorMessage" class="error-banner"><i class="el-icon-warning-outline"></i><span>{{ errorMessage }}</span><el-button size="mini" @click="retryLast">重试</el-button></div>
         </div>
         <div class="composer" v-if="currentSession">
-        <div class="composer-shell" :class="{ focus: composerFocused }"><textarea v-model="draft" rows="3" placeholder="描述你希望 Codex 完成的任务..." @focus="composerFocused = true" @blur="composerFocused = false" @keydown="handleComposerKeydown"></textarea><div class="composer-actions"><span class="composer-hint">{{ socketOpen ? 'Enter 发送 · Ctrl / Cmd + Enter 换行' : '正在连接 Codex...' }}<span v-if="attachments.length"> · {{ attachments.length }} 个附件</span></span><div><input ref="upload" type="file" hidden multiple @change="uploadFiles"><el-button class="icon-button" icon="el-icon-paperclip" circle title="上传文件" @click="$refs.upload.click()"></el-button><el-button class="stop-button" v-if="running" icon="el-icon-video-pause" @click="cancelTurn">停止</el-button><el-button type="primary" icon="el-icon-position" :loading="sending" :disabled="!draft.trim() || sending" @click="sendMessage">{{ running ? '引导' : '发送' }}</el-button></div></div></div>
+        <div v-if="currentSession && currentSession.queuedTurns && currentSession.queuedTurns.length" class="queued-panel"><div class="queued-panel-heading"><span><i class="el-icon-time"></i> 待发送</span><small>按顺序自动执行</small></div><div v-for="item in currentSession.queuedTurns" :key="item.id" class="queued-item"><span class="queued-item-index"></span><span class="queued-item-text">{{ item.text }}</span><el-button v-if="canSteer" type="text" size="mini" icon="el-icon-position" :disabled="sending || deletingQueueId === item.id" @click="steerQueued(item)">引导当前</el-button><el-button class="queue-delete-button" type="text" icon="el-icon-delete" title="删除待发送消息" :loading="deletingQueueId === item.id" :disabled="sending || deletingQueueId !== null" @click.stop="deleteQueued(item)"></el-button></div></div>
+        <div class="composer-shell" :class="{ focus: composerFocused }"><textarea v-model="draft" rows="3" placeholder="描述你希望 Codex 完成的任务..." @focus="composerFocused = true" @blur="composerFocused = false" @keydown="handleComposerKeydown"></textarea><div class="composer-actions"><span class="composer-hint">{{ socketOpen ? (running ? '发送后进入待发送，当前任务完成后自动执行' : 'Enter 发送 · Ctrl / Cmd + Enter 换行') : '正在连接 Codex...' }}<span v-if="currentSession && currentSession.queuedTurns && currentSession.queuedTurns.length"> · 待发送 {{ currentSession.queuedTurns.length }} 条</span><span v-if="attachments.length"> · {{ attachments.length }} 个附件</span></span><div><input ref="upload" type="file" hidden multiple @change="uploadFiles"><el-button class="icon-button" icon="el-icon-paperclip" circle title="上传文件" @click="$refs.upload.click()"></el-button><el-button class="stop-button" v-if="running && currentSession && (currentSession.status === 'RUNNING' || currentSession.status === 'WAITING_APPROVAL')" icon="el-icon-video-pause" @click="cancelTurn">停止</el-button><el-button type="primary" icon="el-icon-position" :loading="sending" :disabled="!draft.trim() || sending" @click="sendMessage">发送</el-button></div></div></div>
         </div>
       </main>
 
@@ -89,7 +90,7 @@
     </div>
 
     <el-dialog title="选择工作空间" :visible.sync="workspaceDialog" width="600px" custom-class="workspace-dialog"><div class="picker-path"><el-button icon="el-icon-back" circle :disabled="!workspaceParent" @click="browse(workspaceParent)"></el-button><span>{{ workspacePath }}</span><el-button type="text" icon="el-icon-folder-add" title="新建目录" @click="createFolder"></el-button></div><div class="root-switch"><button v-for="root in workspaceRoots" :key="root.path" :class="{ active: workspacePath === root.path }" @click="browse(root.path)"><i class="el-icon-folder"></i>{{ root.name }}</button></div><div class="browser-list"><button v-for="item in workspaceItems" :key="item.path" class="browser-row" :class="{ selected: selectedWorkspace === item.path }" @dblclick="browse(item.path)" @click="selectedWorkspace = item.path"><i :class="item.isGitRepository ? 'el-icon-connection' : 'el-icon-folder'"></i><span>{{ item.name }}</span><i class="el-icon-arrow-right"></i></button><div v-if="!workspaceItems.length" class="browser-empty">此目录没有子目录</div></div><div class="dialog-footer"><span class="selected-path">{{ selectedWorkspace || '双击进入目录，或选择当前目录' }}</span><el-button @click="workspaceDialog = false">取消</el-button><el-button type="primary" icon="el-icon-check" :disabled="!selectedWorkspace" @click="confirmWorkspace">选择此目录</el-button></div></el-dialog>
-    <el-dialog title="设置" :visible.sync="settingsDialog" width="540px" custom-class="settings-dialog"><div class="settings-section"><div class="settings-label"><strong>工作权限</strong><span>控制 Codex 执行命令和修改文件时的授权方式。</span></div><el-select v-model="settings.approvalPolicy" class="settings-select"><el-option label="请求批准" value="on-request"></el-option><el-option label="帮我批准" value="on-failure"></el-option><el-option label="完全访问" value="never"></el-option></el-select><p class="settings-warning" v-if="settings.approvalPolicy === 'never'"><i class="el-icon-warning-outline"></i> 完全访问会允许 Codex 在工作空间中直接运行命令并修改文件，请确认你信任当前任务。</p><p class="settings-note">策略对新建会话生效，当前会话不会被中断。</p></div><div class="settings-section runtime-settings"><div class="settings-label"><strong>Codex 运行时</strong><span>{{ runtime.running ? '当前正在运行' : '当前未启动' }}</span></div><el-button size="small" :type="runtime.running ? 'danger' : 'success'" :icon="runtime.running ? 'el-icon-video-pause' : 'el-icon-video-play'" :loading="runtimeBusy" :disabled="runtimeBusy" @click="runtimeAction">{{ runtimeBusy ? '正在切换' : (runtime.running ? '停止 Codex' : '启动 Codex') }}</el-button></div><div class="dialog-footer"><el-button @click="settingsDialog = false">取消</el-button><el-button type="primary" icon="el-icon-check" :loading="settingsSaving" @click="saveSettings">保存设置</el-button></div></el-dialog>
+    <el-dialog title="设置" :visible.sync="settingsDialog" width="540px" custom-class="settings-dialog"><div class="settings-section"><div class="settings-label"><strong>模型</strong><span>选择模型，新建会话时生效。</span></div><el-select v-model="settings.model" class="settings-select"><el-option label="默认（跟随 Codex 配置）" value=""></el-option><el-option label="GPT-5.6 Sol" value="gpt-5.6-sol"></el-option><el-option label="GPT-5.6 Terra" value="gpt-5.6-terra"></el-option><el-option label="GPT-5.6 Luna" value="gpt-5.6-luna"></el-option><el-option label="GPT-5.5" value="gpt-5.5"></el-option><el-option label="GPT-5.2" value="gpt-5.2"></el-option></el-select></div><div class="settings-section"><div class="settings-label"><strong>推理级别</strong><span>控制任务的思考深度，下一次发送时生效。</span></div><el-select v-model="settings.reasoningEffort" class="settings-select"><el-option label="默认（跟随 Codex 配置）" value=""></el-option><el-option label="低" value="low"></el-option><el-option label="中" value="medium"></el-option><el-option label="高" value="high"></el-option><el-option label="超高" value="xhigh"></el-option></el-select></div><div class="settings-section"><div class="settings-label"><strong>工作权限</strong><span>控制 Codex 执行命令和修改文件时的授权方式。</span></div><el-select v-model="settings.approvalPolicy" class="settings-select"><el-option label="请求批准" value="on-request"></el-option><el-option label="帮我批准" value="on-failure"></el-option><el-option label="完全访问" value="never"></el-option></el-select><p class="settings-warning" v-if="settings.approvalPolicy === 'never'"><i class="el-icon-warning-outline"></i> 完全访问会允许 Codex 在工作空间中直接运行命令并修改文件，请确认你信任当前任务。</p><p class="settings-note">策略对新建会话生效，当前会话不会被中断。</p></div><div class="settings-section runtime-settings"><div class="settings-label"><strong>Codex 运行时</strong><span>{{ runtime.running ? '当前正在运行' : '当前未启动' }}</span></div><el-button size="small" :type="runtime.running ? 'danger' : 'success'" :icon="runtime.running ? 'el-icon-video-pause' : 'el-icon-video-play'" :loading="runtimeBusy" :disabled="runtimeBusy" @click="runtimeAction">{{ runtimeBusy ? '正在切换' : (runtime.running ? '停止 Codex' : '启动 Codex') }}</el-button></div><div class="dialog-footer"><el-button @click="settingsDialog = false">取消</el-button><el-button type="primary" icon="el-icon-check" :loading="settingsSaving" @click="saveSettings">保存设置</el-button></div></el-dialog>
   </div>
   </div>
 </template>
@@ -100,9 +101,10 @@ import { marked } from 'marked'
 import DOMPurify from 'dompurify'
 
 export default {
-  data () { return { authReady: false, authenticated: false, loginForm: { username: '', password: '' }, loginLoading: false, loginError: '', projects: [], sessions: [], currentProject: null, currentSession: null, runtime: { running: false }, runtimeBusy: false, settings: { approvalPolicy: 'on-request' }, settingsDialog: false, settingsSaving: false, socket: null, socketOpen: false, leftCollapsed: false, rightCollapsed: false, activeTab: 'changes', tabs: [{ id: 'changes', label: 'Changes' }, { id: 'diff', label: 'Diff' }, { id: 'files', label: 'Files' }], messages: [], itemPhases: {}, activities: [], liveStatus: '', draft: '', lastDraft: '', sending: false, running: false, errorMessage: '', gitFiles: [], currentBranch: '', branches: [], diffText: '', selectedFile: '', fileItems: [], fileContent: null, expandedPaths: {}, workspaceDialog: false, workspaceRoots: [], workspaceItems: [], workspacePath: '', workspaceParent: '', selectedWorkspace: '', approvalDialog: false, approvalRequestId: null, approvalCommand: '', composerFocused: false, showArchived: false, sessionSearch: '', attachments: [], statusTimer: null, seenEventIds: {} } },
+  data () { return { authReady: false, authenticated: false, loginForm: { username: '', password: '' }, loginLoading: false, loginError: '', projects: [], sessions: [], currentProject: null, currentSession: null, runtime: { running: false }, runtimeBusy: false, runtimeTimer: null, settings: { approvalPolicy: 'on-request', model: '', reasoningEffort: '' }, settingsDialog: false, settingsSaving: false, socket: null, socketOpen: false, leftCollapsed: false, rightCollapsed: false, activeTab: 'changes', tabs: [{ id: 'changes', label: 'Changes' }, { id: 'diff', label: 'Diff' }, { id: 'files', label: 'Files' }], messages: [], itemPhases: {}, activities: [], liveStatus: '', draft: '', lastDraft: '', sending: false, deletingQueueId: null, running: false, activeTurnText: '', errorMessage: '', gitFiles: [], currentBranch: '', branches: [], diffText: '', selectedFile: '', fileContent: null, expandedPaths: {}, workspaceDialog: false, workspaceRoots: [], workspaceItems: [], workspacePath: '', workspaceParent: '', selectedWorkspace: '', approvalDialog: false, approvalRequestId: null, approvalCommand: '', composerFocused: false, showArchived: false, sessionSearch: '', attachments: [], statusTimer: null, statusSyncInFlight: false, lastEventRecoveryAt: 0, lastEventId: '', seenEventIds: {}, followOutput: true } },
   computed: {
     visibleSessions () { const query = this.sessionSearch.trim().toLowerCase(); return this.sessions.filter(s => (this.showArchived || !s.archived) && (!query || `${s.title} ${s.lastUserMessage || ''}`.toLowerCase().includes(query))) },
+    canSteer () { return !!(this.currentSession && this.currentSession.status === 'RUNNING' && this.currentSession.currentTurnId && this.currentSession.steeringAvailable !== false) },
     displayMessages () {
       const result = []
       let thinking = null
@@ -126,7 +128,7 @@ export default {
     }
   },
   mounted () { this.checkAuth() },
-  beforeDestroy () { if (this.socket) this.socket.close(); this.stopStatusPolling() },
+  beforeDestroy () { if (this.socket) this.socket.close(); this.stopStatusPolling(); this.stopRuntimePolling() },
   methods: {
     async checkAuth () {
       try {
@@ -182,6 +184,7 @@ export default {
       try { await api.logout() } catch (e) {}
       this.closeSocket()
       this.stopStatusPolling()
+      this.stopRuntimePolling()
       this.authenticated = false
       this.currentProject = null
       this.currentSession = null
@@ -189,9 +192,9 @@ export default {
       this.sessions = []
       this.messages = []
     },
-    async refreshAll () { try { const [projects, runtime, settings] = await Promise.all([api.projects(), api.runtime(), api.settings()]); this.projects = projects.data; this.runtime = runtime.data; this.settings = settings.data; if (this.currentProject) { const found = this.projects.find(p => p.id === this.currentProject.id); if (found) await this.selectProject(found) } else if (this.projects.length) await this.selectProject(this.projects[0]) } catch (e) { this.notifyError(e) } },
+    async refreshAll () { try { const [projects, runtime, settings] = await Promise.all([api.projects(), api.runtime(), api.settings()]); this.projects = projects.data; this.runtime = runtime.data; this.settings = settings.data; this.startRuntimePolling(); if (this.currentProject) { const found = this.projects.find(p => p.id === this.currentProject.id); if (found) await this.selectProject(found) } else if (this.projects.length) await this.selectProject(this.projects[0]) } catch (e) { this.notifyError(e) } },
     async selectProject (project) { this.stopStatusPolling(); this.closeSocket(); this.currentProject = project; this.currentSession = null; this.messages = []; this.sessions = []; this.leftCollapsed = true; try { const result = await api.sessions(project.id); this.sessions = result.data; await Promise.all([this.refreshGit(), this.loadFiles()]); if (this.sessions.length) await this.selectSession(this.visibleSessions[0] || this.sessions[0]) } catch (e) { this.notifyError(e) } },
-    async selectSession (session) { this.stopStatusPolling(); this.currentSession = session; this.errorMessage = ''; this.messages = []; this.activities = []; this.liveStatus = ''; this.diffText = ''; this.selectedFile = ''; this.fileContent = null; this.seenEventIds = {}; this.leftCollapsed = true; try { const result = await api.events(session.id); result.data.forEach(event => this.applyEvent(event, true)); this.running = session.status === 'RUNNING' || session.status === 'WAITING_APPROVAL'; if (this.running && !this.liveStatus) this.liveStatus = session.status === 'WAITING_APPROVAL' ? '等待审批' : '正在思考'; this.connectSocket(session.id); this.startStatusPolling(session.id); this.$nextTick(this.scrollToBottom) } catch (e) { this.notifyError(e) } },
+    async selectSession (session) { this.stopStatusPolling(); this.currentSession = session; this.followOutput = true; this.errorMessage = ''; this.messages = []; this.activities = []; this.liveStatus = ''; this.activeTurnText = ''; this.diffText = ''; this.selectedFile = ''; this.fileContent = null; this.seenEventIds = {}; this.lastEventRecoveryAt = 0; this.lastEventId = ''; this.leftCollapsed = true; this.connectSocket(session.id); try { const result = await api.events(session.id); if (!this.currentSession || this.currentSession.id !== session.id) return; result.data.forEach(event => this.applyEvent(event, true)); this.running = this.sessionHasPendingWork(this.currentSession); if (this.running && !this.liveStatus) this.liveStatus = this.currentSession.status === 'WAITING_APPROVAL' ? '等待审批' : (this.hasQueuedTurns(this.currentSession) ? '等待排队任务' : '正在思考'); this.startStatusPolling(session.id); this.scrollToBottomAfterRender() } catch (e) { this.notifyError(e) } },
     async createSession () { if (!this.currentProject) return; try { const result = await api.createSession(this.currentProject.id, { title: '新建会话' }); this.sessions.unshift(result.data); await this.selectSession(result.data) } catch (e) { this.notifyError(e) } },
     async renameSession () { const title = await this.ask('会话名称', this.currentSession.title); if (title) { const result = await api.updateSession(this.currentSession.id, { title }); this.currentSession = result.data; const index = this.sessions.findIndex(s => s.id === result.data.id); if (index >= 0) this.$set(this.sessions, index, result.data) } },
     async toggleArchive () { try { const result = this.currentSession.archived ? await api.unarchive(this.currentSession.id) : await api.archive(this.currentSession.id); this.currentSession = result.data; const index = this.sessions.findIndex(s => s.id === result.data.id); if (index >= 0) this.$set(this.sessions, index, result.data) } catch (e) { this.notifyError(e) } },
@@ -202,22 +205,26 @@ export default {
         this.sendMessage()
       }
     },
-    async sendMessage () {
+    async sendMessage () { return this.submitMessage() },
+    async submitMessage () {
       if (!this.currentSession || !this.draft.trim() || this.sending) return
-      const steering = this.running
+      const wasRunning = this.running
       const text = this.draft.trim()
-      const attachments = this.attachments.map(item => item.path)
-      this.draft = ''
-      this.attachments = []
+      const attachmentItems = this.attachments.slice()
+      const attachments = attachmentItems.map(item => item.path)
+      this.followOutput = true
       this.lastDraft = text
       this.errorMessage = ''
       this.sending = true
       this.running = true
-      this.liveStatus = '正在思考'
-      this.messages.push({ id: `user-${Date.now()}`, role: 'user', text, timestamp: new Date().toISOString() })
+      this.liveStatus = wasRunning ? '已加入待发送' : '正在思考'
+      const messageId = `user-${Date.now()}`
+      if (!wasRunning) this.messages.push({ id: messageId, role: 'user', text, timestamp: new Date().toISOString() })
       this.$nextTick(this.scrollToBottom)
       try {
-        const result = await (steering ? api.steerTurn(this.currentSession.id, { text, attachments }) : api.startTurn(this.currentSession.id, { text, attachments }))
+        const result = await api.startTurn(this.currentSession.id, { text, attachments })
+        this.draft = ''
+        this.attachments = []
         if (result && result.data) {
           this.currentSession = result.data
           const index = this.sessions.findIndex(item => item.id === result.data.id)
@@ -225,20 +232,76 @@ export default {
         }
         this.startStatusPolling(this.currentSession.id)
       } catch (e) {
-        this.running = false
-        this.liveStatus = ''
-        this.stopStatusPolling()
+        this.messages = this.messages.filter(message => message.id !== messageId)
+        this.draft = text
+        this.attachments = attachmentItems
+        this.running = wasRunning
+        this.liveStatus = wasRunning ? '正在思考' : ''
+        if (!wasRunning) this.stopStatusPolling()
         this.errorMessage = e && e.response && e.response.data ? e.response.data.message : (e.message || '任务发送失败')
         this.notifyError(e)
       } finally {
         this.sending = false
       }
     },
-    async cancelTurn () { if (!this.currentSession) return; try { await api.cancelTurn(this.currentSession.id) } catch (e) { this.notifyError(e) } },
+    async steerQueued (item) {
+      if (!item || this.sending) return
+      this.sending = true
+      try {
+        const result = await api.steerQueued(this.currentSession.id, item.id)
+        if (result && result.data) this.currentSession = result.data
+        this.liveStatus = '正在引导当前任务'
+        this.startStatusPolling(this.currentSession.id)
+      } catch (e) { this.notifyError(e) } finally { this.sending = false }
+    },
+    async deleteQueued (item) {
+      if (!item || this.deletingQueueId) return
+      this.deletingQueueId = item.id
+      try {
+        const result = await api.deleteQueued(this.currentSession.id, item.id)
+        if (result && result.data) {
+          this.currentSession = result.data
+          const index = this.sessions.findIndex(entry => entry.id === result.data.id)
+          if (index >= 0) this.$set(this.sessions, index, result.data)
+        }
+      } catch (e) { this.notifyError(e) } finally { this.deletingQueueId = null }
+    },
+     async cancelTurn () { if (!this.currentSession) return; try { const result = await api.cancelTurn(this.currentSession.id); if (result && result.data) { this.currentSession = result.data; const index = this.sessions.findIndex(item => item.id === result.data.id); if (index >= 0) this.$set(this.sessions, index, result.data); this.running = this.sessionHasPendingWork(result.data); this.liveStatus = this.running ? '等待排队任务' : '' } } catch (e) { this.notifyError(e) } },
     retryLast () { if (this.lastDraft && !this.running) { this.draft = this.lastDraft; this.sendMessage() } },
     stopStatusPolling () { if (this.statusTimer) { clearInterval(this.statusTimer); this.statusTimer = null } },
-    startStatusPolling (sessionId) { this.stopStatusPolling(); this.statusTimer = setInterval(() => this.syncSession(sessionId), 1000) },
-    async syncSession (sessionId) { try { const [sessionResult, eventsResult] = await Promise.all([api.session(sessionId), api.events(sessionId)]); if (!this.currentSession || this.currentSession.id !== sessionId) return; this.currentSession = sessionResult.data; const index = this.sessions.findIndex(item => item.id === sessionId); if (index >= 0) this.$set(this.sessions, index, sessionResult.data); eventsResult.data.forEach(event => this.applyEvent(event, false)); const active = sessionResult.data.status === 'RUNNING' || sessionResult.data.status === 'WAITING_APPROVAL'; this.running = active; if (!active) this.stopStatusPolling() } catch (e) {} },
+    startRuntimePolling () { this.stopRuntimePolling(); this.runtimeTimer = setInterval(() => this.syncRuntime(), 60000) },
+    stopRuntimePolling () { if (this.runtimeTimer) { clearInterval(this.runtimeTimer); this.runtimeTimer = null } },
+    async syncRuntime () { try { this.runtime = (await api.runtime()).data } catch (e) {} },
+    startStatusPolling (sessionId) { this.stopStatusPolling(); this.statusSyncInFlight = false; this.statusTimer = setInterval(() => this.syncSession(sessionId), 1000) },
+    async syncSession (sessionId) {
+      if (this.statusSyncInFlight) return
+      this.statusSyncInFlight = true
+      try {
+        const sessionResult = await api.session(sessionId)
+        if (!this.currentSession || this.currentSession.id !== sessionId) return
+        const previousPending = this.sessionHasPendingWork(this.currentSession)
+        this.currentSession = sessionResult.data
+        const index = this.sessions.findIndex(item => item.id === sessionId)
+        if (index >= 0) this.$set(this.sessions, index, sessionResult.data)
+        const pending = this.sessionHasPendingWork(sessionResult.data)
+        this.running = pending
+        // SSE is the normal event path. Fetch history only for reconnect recovery or a terminal transition.
+        const shouldRecoverEvents = !this.socketOpen || (previousPending && !pending)
+        const recoveryDue = Date.now() - this.lastEventRecoveryAt > 10000
+        if (shouldRecoverEvents && recoveryDue) {
+          this.lastEventRecoveryAt = Date.now()
+          const eventsResult = await api.events(sessionId, this.lastEventId)
+          if (this.currentSession && this.currentSession.id === sessionId) eventsResult.data.forEach(event => this.applyEvent(event, false))
+        }
+        if (!pending) this.stopStatusPolling()
+      } catch (e) {
+        if (window.console) console.warn('[codex-web] 会话状态同步失败', sessionId, e)
+      } finally {
+        this.statusSyncInFlight = false
+      }
+    },
+    hasQueuedTurns (session) { return !!(session && session.queuedTurns && session.queuedTurns.length) },
+    sessionHasPendingWork (session) { return !!(session && (session.status === 'RUNNING' || session.status === 'WAITING_APPROVAL' || this.hasQueuedTurns(session))) },
     legacyApplyEvent (event, replay) { if (!replay && event.id && this.seenEventIds[event.id]) return; if (event.id) this.$set(this.seenEventIds, event.id, true); const type = event.type; const data = event.data || {}; const timestamp = event.timestamp || new Date().toISOString(); if (type === 'agent.message.delta') { const text = data.text || ''; let last = this.messages[this.messages.length - 1]; if (!last || last.role !== 'assistant') { last = { id: `assistant-${Date.now()}`, role: 'assistant', text: '', timestamp, streaming: true }; this.messages.push(last) } last.text += text; last.streaming = true; this.running = true } else if (type === 'turn.completed') { const last = this.messages[this.messages.length - 1]; if (last && last.role === 'assistant') last.streaming = false; this.running = false } else if (type === 'turn.cancelled') { this.running = false } else if (type === 'tool.call.started' || type === 'tool.call.output' || type === 'tool.call.completed') { const detail = data.text || (data.payload && (data.payload.command || data.payload.output)) || ''; const existing = this.activities.find(a => a.rawId === (data.payload && (data.payload.itemId || data.payload.callId))); if (existing) { existing.detail = String(detail); existing.state = type.endsWith('completed') ? '完成' : '运行中' } else this.activities.push({ id: `${type}-${Date.now()}-${Math.random()}`, rawId: data.payload && data.payload.itemId, icon: type.includes('output') ? 'el-icon-loading' : 'el-icon-cpu', title: type.endsWith('started') ? 'Codex 正在执行工具' : '工具输出', detail: String(detail).slice(0, 220), state: type.endsWith('completed') ? '完成' : '运行中' }) } else if (type === 'approval.request') { const payload = data.payload || {}; this.approvalRequestId = data.requestId; this.approvalCommand = Array.isArray(payload.command) ? payload.command.join(' ') : (payload.command || payload.reason || '需要你的确认'); this.approvalDialog = true; this.running = true } else if (type === 'diff.updated') { const payload = data.payload || {}; this.diffText = payload.diff || data.text || this.diffText; } else if (type === 'error') { this.errorMessage = data.text || (data.payload && data.payload.message) || data.message || 'Codex 运行失败'; this.running = false } if (!replay) this.$nextTick(this.scrollToBottom) },
     closeSocket () { if (this.socket) { this.socket.onopen = null; this.socket.onerror = null; this.socket.onmessage = null; this.socket.close() } this.socket = null; this.socketOpen = false },
     connectSocket (sessionId) {
@@ -251,7 +314,7 @@ export default {
       this.socket = source
       this.socketOpen = false
       source.onopen = () => { if (this.socket === source) this.socketOpen = true }
-      source.onerror = () => { if (this.socket === source) this.socketOpen = false }
+      source.onerror = error => { if (this.socket === source) { this.socketOpen = false; if (window.console) console.warn('[codex-web] SSE 连接异常，等待自动重连', sessionId, error) } }
       source.onmessage = message => {
         try {
           const event = JSON.parse(message.data)
@@ -299,22 +362,49 @@ export default {
     compactPath (path) { return path && path.length > 27 ? `...${path.slice(-24)}` : path },
     formatTime (value) { try { return new Date(value).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) } catch (e) { return '' } },
     renderMarkdown (text) { return DOMPurify.sanitize(marked.parse(text || '', { headerIds: false, mangle: false })) },
-    scrollToBottom () { const box = this.$refs.messageScroll; if (box) box.scrollTop = box.scrollHeight },
+    handleMessageScroll () {
+      const box = this.$refs.messageScroll
+      if (!box) return
+      const distanceFromBottom = box.scrollHeight - box.clientHeight - box.scrollTop
+      this.followOutput = distanceFromBottom <= 48
+    },
+    scrollToBottom () {
+      const box = this.$refs.messageScroll
+      if (!box || !this.followOutput) return
+      box.scrollTo({ top: box.scrollHeight, behavior: 'auto' })
+    },
+    scrollToBottomAfterRender () { this.$nextTick(() => { this.scrollToBottom(); requestAnimationFrame(() => { this.scrollToBottom(); requestAnimationFrame(() => this.scrollToBottom()); setTimeout(() => this.scrollToBottom(), 100) }) }) },
     async respondApproval (decision) { try { await api.respondApproval(this.currentSession.id, { requestId: this.approvalRequestId, decision }) } catch (e) { this.notifyError(e) } finally { this.approvalDialog = false; this.approvalRequestId = null } },
     setThinkingOpen (group, event) { const open = event.target.open; (group.sourceIds || []).forEach(id => { const message = this.messages.find(item => item.id === id); if (message) this.$set(message, 'thinkingOpen', open) }) },
     notifyError (error) { const message = error && error.response && error.response.data ? error.response.data.message : (error.message || '请求失败'); this.$message.error(message) }
     ,applyEvent (event, replay) {
       if (!event) return
       if (event.id && this.seenEventIds[event.id]) return
-      if (event.id) this.$set(this.seenEventIds, event.id, true)
+      if (event.id) { this.$set(this.seenEventIds, event.id, true); this.lastEventId = event.id }
       const type = event.type
       const data = event.data || {}
       const timestamp = event.timestamp || new Date().toISOString()
-      if (type === 'turn.started') {
+      if (type === 'turn.accepted') {
+        if (this.currentSession) {
+          this.$set(this.currentSession, 'currentTurnId', data.turnId || null)
+          this.$set(this.currentSession, 'status', 'RUNNING')
+        }
+      } else if (type === 'turn.queued') {
         const text = data.text || ''
-        const duplicate = this.messages.find(message => message.role === 'user' && message.text === text && message.timestamp === timestamp)
+        this.running = true
+        this.liveStatus = '等待当前任务完成'
+      } else if (type === 'turn.steered') {
+        const text = data.text || ''
         const last = this.messages[this.messages.length - 1]
-        if (text && !duplicate && (!last || last.role !== 'user' || last.text !== text)) this.messages.push({ id: `user-event-${event.id || Date.now()}`, role: 'user', text, timestamp })
+        if (text && (!last || last.role !== 'user' || last.text !== text)) this.messages.push({ id: `user-event-${event.id || Date.now()}`, role: 'user', text, timestamp })
+        this.running = true
+        this.liveStatus = '正在思考'
+      } else if (type === 'turn.started') {
+        if (this.currentSession) this.$set(this.currentSession, 'status', 'RUNNING')
+        const text = data.text || ''
+        const last = this.messages[this.messages.length - 1]
+        if (text && (!last || last.role !== 'user' || last.text !== text)) this.messages.push({ id: `user-event-${event.id || Date.now()}`, role: 'user', text, timestamp })
+        this.activeTurnText = text || this.activeTurnText
         this.running = true
         this.liveStatus = '正在思考'
       } else if (type === 'agent.message.delta') {
@@ -337,17 +427,31 @@ export default {
         this.errorMessage = ''
         this.liveStatus = '正在整理回复'
       } else if (type === 'turn.completed') {
+        if (this.currentSession) {
+          this.$set(this.currentSession, 'currentTurnId', null)
+          this.$set(this.currentSession, 'status', 'COMPLETED')
+        }
         this.messages.forEach(message => {
           if (message.role === 'assistant' && message.streaming) message.streaming = false
           if (message.role === 'assistant' && message.phase !== 'final_answer') this.$set(message, 'thinkingOpen', false)
         })
-        this.running = false
+        const queuedTurnCount = Number(data.queuedTurnCount || 0)
+        this.running = queuedTurnCount > 0 || this.hasQueuedTurns(this.currentSession)
+        this.activeTurnText = ''
         this.errorMessage = ''
-        this.liveStatus = ''
+        this.liveStatus = this.running ? '等待排队任务' : ''
       } else if (type === 'turn.cancelled') {
-        this.running = false
+        if (this.currentSession) this.$set(this.currentSession, 'status', 'CANCELLED')
+        this.running = this.hasQueuedTurns(this.currentSession)
+        this.activeTurnText = ''
+        this.liveStatus = this.running ? '等待排队任务' : ''
+      } else if (type === 'turn.steer.unavailable') {
+        if (this.currentSession) this.$set(this.currentSession, 'steeringAvailable', false)
+      } else if (type === 'turn.queue.error') {
+        this.errorMessage = '排队任务启动失败，请检查 Codex 运行状态后重试'
         this.liveStatus = ''
       } else if (type === 'turn.retrying') {
+        if (this.currentSession) this.$set(this.currentSession, 'status', 'RUNNING')
         this.running = true
         this.liveStatus = '正在重新连接 Codex'
       } else if (type === 'tool.call.started' || type === 'tool.call.output' || type === 'tool.call.completed') {
@@ -374,6 +478,7 @@ export default {
         this.running = true
         this.liveStatus = type.endsWith('completed') ? '正在整理回复' : '正在执行操作'
       } else if (type === 'approval.request') {
+        if (this.currentSession) this.$set(this.currentSession, 'status', 'WAITING_APPROVAL')
         const payload = data.payload || {}
         this.approvalRequestId = data.requestId
         this.approvalCommand = Array.isArray(payload.command) ? payload.command.join(' ') : (payload.command || payload.reason || '需要你的确认')
@@ -385,13 +490,15 @@ export default {
         this.diffText = payload.diff || data.text || this.diffText
       } else if (type === 'error') {
         if (data.payload && data.payload.willRetry) {
+          if (this.currentSession) this.$set(this.currentSession, 'status', 'RUNNING')
           this.running = true
           this.liveStatus = '正在重新连接 Codex'
           return
         }
+        if (this.currentSession) this.$set(this.currentSession, 'status', 'FAILED')
         this.errorMessage = data.text || (data.payload && data.payload.message) || data.message || 'Codex 运行失败'
-        this.running = false
-        this.liveStatus = ''
+        this.running = this.hasQueuedTurns(this.currentSession)
+        this.liveStatus = this.running ? '等待排队任务' : ''
       }
       if (!replay) this.$nextTick(this.scrollToBottom)
     }
