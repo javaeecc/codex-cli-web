@@ -22,7 +22,15 @@ public class SessionController {
     @GetMapping("/api/sessions/{id}") public Session get(@PathVariable String id) { return require(id); }
     @GetMapping("/api/sessions/{id}/events") public List<?> events(@PathVariable String id, @RequestParam(value = "after", required = false) String after) { return codex.events(id, after); }
     @GetMapping("/api/sessions/{id}/history") public cn.codexweb.model.SessionHistory history(@PathVariable String id) { return codex.history(id); }
-    @CrossOrigin(origins = "*") @GetMapping(value = "/api/sessions/{id}/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE) public SseEmitter stream(@PathVariable String id) { require(id); return streams.subscribe(id); }
+    @GetMapping(value = "/api/sessions/{id}/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE) public SseEmitter stream(@PathVariable String id, HttpServletResponse response) {
+        require(id);
+        response.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
+        response.setHeader("Pragma", "no-cache");
+        response.setHeader("X-Accel-Buffering", "no");
+        SseEmitter emitter = streams.subscribe(id);
+        try { response.flushBuffer(); } catch (java.io.IOException exception) { emitter.completeWithError(exception); }
+        return emitter;
+    }
     @PostMapping("/api/sessions/{id}/turns") public Session startTurn(@PathVariable String id, @RequestBody Map<String, Object> body) { codex.startTurn(id, body == null ? null : text(body.get("text")), strings(body == null ? null : body.get("attachments"))); return require(id); }
     @PostMapping("/api/sessions/{id}/steer") public Session steer(@PathVariable String id, @RequestBody Map<String, Object> body) { codex.steer(id, body == null ? null : text(body.get("text")), strings(body == null ? null : body.get("attachments"))); return require(id); }
     @PostMapping("/api/sessions/{id}/queue/{queueId}/steer") public Session steerQueued(@PathVariable String id, @PathVariable String queueId) { codex.steerQueued(id, queueId); return require(id); }

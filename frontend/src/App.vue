@@ -288,7 +288,7 @@ export default {
       this.statusSyncInFlight = false
       // SSE is the primary path; poll only as a reconnect/recovery fallback.
       this.statusTimer = setInterval(() => {
-        if (this.socket && this.socket.readyState === EventSource.OPEN) this.socketOpen = true
+        if (this.socket && this.socket.readyState === 1) this.socketOpen = true
         if (!this.socketOpen) this.syncSession(sessionId)
       }, 5000)
     },
@@ -330,19 +330,51 @@ export default {
         return
       }
       if (this.socket) this.closeSocket()
-      const source = new EventSource(api.streamUrl(sessionId))
+      const controller = new AbortController()
+      const source = { readyState: 0, close: () => { source.readyState = 2; controller.abort() } }
       this.socket = source
       this.socketOpen = false
-      source.onopen = () => { if (this.socket === source) { this.socketOpen = true; if (this.socketRetryTimer) { clearTimeout(this.socketRetryTimer); this.socketRetryTimer = null } } }
-      source.onerror = error => { if (this.socket === source) { this.socketOpen = false; this.recoverSocketAuth(); this.scheduleSocketReconnect(sessionId, source); if (window.console) console.warn('[codex-web] SSE 连接异常，等待自动重连', sessionId, error) } }
-      source.onmessage = message => {
+      const handleEvent = data => {
         try {
-          const event = JSON.parse(message.data)
+          const event = JSON.parse(data)
           if (this.socket === source) this.socketOpen = true
           if (event.type === 'stream.ready') return
           if (event.sessionId === this.currentSession?.id) this.applyEvent(event, false)
-        } catch (e) {}
+        } catch (e) { if (window.console) console.warn('[codex-web] SSE 事件解析失败', e) }
       }
+      ;(async () => {
+        try {
+          const response = await fetch(api.streamUrl(sessionId), { credentials: 'include', headers: { Accept: 'text/event-stream', 'Cache-Control': 'no-cache' }, signal: controller.signal })
+          if (this.socket !== source) return
+          if (!response.ok) throw new Error(`SSE HTTP ${response.status}`)
+          source.readyState = 1
+          this.socketOpen = true
+          if (this.socketRetryTimer) { clearTimeout(this.socketRetryTimer); this.socketRetryTimer = null }
+          const reader = response.body.getReader()
+          const decoder = new TextDecoder()
+          let buffer = ''
+          while (this.socket === source) {
+            const part = await reader.read()
+            if (part.done) break
+            buffer += decoder.decode(part.value, { stream: true })
+            let boundary
+            while ((boundary = buffer.search(/\r?\n\r?\n/)) >= 0) {
+              const block = buffer.slice(0, boundary)
+              buffer = buffer.slice(boundary).replace(/^\r?\n\r?\n/, '')
+              const data = block.split(/\r?\n/).filter(line => line.indexOf('data:') === 0).map(line => line.slice(5).trim()).join('\n')
+              if (data) handleEvent(data)
+            }
+          }
+          if (this.socket === source) throw new Error('SSE stream ended')
+        } catch (error) {
+          if (controller.signal.aborted || this.socket !== source) return
+          source.readyState = 2
+          this.socketOpen = false
+          this.recoverSocketAuth()
+          this.scheduleSocketReconnect(sessionId, source)
+          if (window.console) console.warn('[codex-web] SSE 连接异常，等待自动重连', sessionId, error)
+        }
+      })()
     },
     async refreshGit () { if (!this.currentProject) return; try { const [status, branches] = await Promise.all([api.gitStatus(this.currentProject.id), api.branches(this.currentProject.id)]); this.gitFiles = status.data.files || []; this.currentBranch = status.data.branch || ''; this.branches = branches.data || [] } catch (e) { this.gitFiles = []; this.currentBranch = ''; this.branches = [] } },
     async checkoutBranch (branch) { if (!this.currentProject || !branch) return; try { const result = await api.checkout(this.currentProject.id, branch); this.currentBranch = result.data.branch || branch; await this.refreshGit(); this.$message.success('已切换分支') } catch (e) { await this.refreshGit(); this.notifyError(e) } },
