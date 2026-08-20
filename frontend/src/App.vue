@@ -101,7 +101,7 @@ import { marked } from 'marked'
 import DOMPurify from 'dompurify'
 
 export default {
-  data () { return { authReady: false, authenticated: false, loginForm: { username: '', password: '' }, loginLoading: false, loginError: '', authSyncInFlight: false, projects: [], sessions: [], currentProject: null, currentSession: null, runtime: { running: false }, runtimeBusy: false, runtimeTimer: null, settings: { approvalPolicy: 'on-request', model: '', reasoningEffort: '' }, settingsDialog: false, settingsSaving: false, socket: null, socketOpen: false, leftCollapsed: false, rightCollapsed: false, activeTab: 'changes', tabs: [{ id: 'changes', label: 'Changes' }, { id: 'diff', label: 'Diff' }, { id: 'files', label: 'Files' }], messages: [], itemPhases: {}, activities: [], liveStatus: '', draft: '', lastDraft: '', sending: false, deletingQueueId: null, running: false, activeTurnText: '', errorMessage: '', gitFiles: [], currentBranch: '', branches: [], diffText: '', selectedFile: '', fileContent: null, expandedPaths: {}, workspaceDialog: false, workspaceRoots: [], workspaceItems: [], workspacePath: '', workspaceParent: '', selectedWorkspace: '', approvalDialog: false, approvalRequestId: null, approvalCommand: '', composerFocused: false, showArchived: false, sessionSearch: '', attachments: [], statusTimer: null, statusSyncInFlight: false, sessionLoadController: null, sessionLoadGeneration: 0, markdownCache: null, lastEventId: '', seenEventIds: {}, followOutput: true } },
+  data () { return { authReady: false, authenticated: false, loginForm: { username: '', password: '' }, loginLoading: false, loginError: '', authSyncInFlight: false, projects: [], sessions: [], currentProject: null, currentSession: null, runtime: { running: false }, runtimeBusy: false, runtimeTimer: null, settings: { approvalPolicy: 'on-request', model: '', reasoningEffort: '' }, settingsDialog: false, settingsSaving: false, socket: null, socketOpen: false, socketRetryTimer: null, leftCollapsed: false, rightCollapsed: false, activeTab: 'changes', tabs: [{ id: 'changes', label: 'Changes' }, { id: 'diff', label: 'Diff' }, { id: 'files', label: 'Files' }], messages: [], itemPhases: {}, activities: [], liveStatus: '', draft: '', lastDraft: '', sending: false, deletingQueueId: null, running: false, activeTurnText: '', errorMessage: '', gitFiles: [], currentBranch: '', branches: [], diffText: '', selectedFile: '', fileContent: null, expandedPaths: {}, workspaceDialog: false, workspaceRoots: [], workspaceItems: [], workspacePath: '', workspaceParent: '', selectedWorkspace: '', approvalDialog: false, approvalRequestId: null, approvalCommand: '', composerFocused: false, showArchived: false, sessionSearch: '', attachments: [], statusTimer: null, statusSyncInFlight: false, sessionLoadController: null, sessionLoadGeneration: 0, markdownCache: null, lastEventId: '', seenEventIds: {}, followOutput: true } },
   computed: {
     visibleSessions () { const query = this.sessionSearch.trim().toLowerCase(); return this.sessions.filter(s => (this.showArchived || !s.archived) && (!query || `${s.title} ${s.lastUserMessage || ''}`.toLowerCase().includes(query))) },
     canSteer () { return !!(this.currentSession && this.currentSession.status === 'RUNNING' && this.currentSession.currentTurnId && this.currentSession.steeringAvailable !== false) },
@@ -128,7 +128,7 @@ export default {
     }
   },
   mounted () { this.checkAuth() },
-  beforeDestroy () { if (this.socket) this.socket.close(); if (this.sessionLoadController) this.sessionLoadController.abort(); this.stopStatusPolling(); this.stopRuntimePolling() },
+  beforeDestroy () { this.closeSocket(); if (this.sessionLoadController) this.sessionLoadController.abort(); this.stopStatusPolling(); this.stopRuntimePolling() },
   methods: {
     async checkAuth () {
       try {
@@ -288,6 +288,7 @@ export default {
       this.statusSyncInFlight = false
       // SSE is the primary path; poll only as a reconnect/recovery fallback.
       this.statusTimer = setInterval(() => {
+        if (this.socket && this.socket.readyState === EventSource.OPEN) this.socketOpen = true
         if (!this.socketOpen) this.syncSession(sessionId)
       }, 5000)
     },
@@ -321,7 +322,8 @@ export default {
     hasQueuedTurns (session) { return !!(session && session.queuedTurns && session.queuedTurns.length) },
     sessionHasPendingWork (session) { return !!(session && (session.status === 'RUNNING' || session.status === 'WAITING_APPROVAL' || this.hasQueuedTurns(session))) },
     legacyApplyEvent (event, replay) { if (!replay && event.id && this.seenEventIds[event.id]) return; if (event.id) this.$set(this.seenEventIds, event.id, true); const type = event.type; const data = event.data || {}; const timestamp = event.timestamp || new Date().toISOString(); if (type === 'agent.message.delta') { const text = data.text || ''; let last = this.messages[this.messages.length - 1]; if (!last || last.role !== 'assistant') { last = { id: `assistant-${Date.now()}`, role: 'assistant', text: '', timestamp, streaming: true }; this.messages.push(last) } last.text += text; last.streaming = true; this.running = true } else if (type === 'turn.completed') { const last = this.messages[this.messages.length - 1]; if (last && last.role === 'assistant') last.streaming = false; this.running = false } else if (type === 'turn.cancelled') { this.running = false } else if (type === 'tool.call.started' || type === 'tool.call.output' || type === 'tool.call.completed') { const detail = data.text || (data.payload && (data.payload.command || data.payload.output)) || ''; const existing = this.activities.find(a => a.rawId === (data.payload && (data.payload.itemId || data.payload.callId))); if (existing) { existing.detail = String(detail); existing.state = type.endsWith('completed') ? '完成' : '运行中' } else this.activities.push({ id: `${type}-${Date.now()}-${Math.random()}`, rawId: data.payload && data.payload.itemId, icon: type.includes('output') ? 'el-icon-loading' : 'el-icon-cpu', title: type.endsWith('started') ? 'Codex 正在执行工具' : '工具输出', detail: String(detail).slice(0, 220), state: type.endsWith('completed') ? '完成' : '运行中' }) } else if (type === 'approval.request') { const payload = data.payload || {}; this.approvalRequestId = data.requestId; this.approvalCommand = Array.isArray(payload.command) ? payload.command.join(' ') : (payload.command || payload.reason || '需要你的确认'); this.approvalDialog = true; this.running = true } else if (type === 'diff.updated') { const payload = data.payload || {}; this.diffText = payload.diff || data.text || this.diffText; } else if (type === 'error') { this.errorMessage = data.text || (data.payload && data.payload.message) || data.message || 'Codex 运行失败'; this.running = false } if (!replay) this.$nextTick(this.scrollToBottom) },
-    closeSocket () { if (this.socket) { this.socket.onopen = null; this.socket.onerror = null; this.socket.onmessage = null; this.socket.close() } this.socket = null; this.socketOpen = false },
+    closeSocket () { if (this.socketRetryTimer) { clearTimeout(this.socketRetryTimer); this.socketRetryTimer = null }; if (this.socket) { this.socket.onopen = null; this.socket.onerror = null; this.socket.onmessage = null; this.socket.close() } this.socket = null; this.socketOpen = false },
+    scheduleSocketReconnect (sessionId, source) { if (this.socketRetryTimer) clearTimeout(this.socketRetryTimer); this.socketRetryTimer = setTimeout(() => { this.socketRetryTimer = null; if (this.socket === source && !this.socketOpen) this.connectSocket(sessionId) }, 5000) },
     connectSocket (sessionId) {
       if (!sessionId) {
         this.closeSocket()
@@ -331,12 +333,13 @@ export default {
       const source = new EventSource(api.streamUrl(sessionId))
       this.socket = source
       this.socketOpen = false
-      source.onopen = () => { if (this.socket === source) this.socketOpen = true }
-      source.onerror = error => { if (this.socket === source) { this.socketOpen = false; this.recoverSocketAuth(); if (window.console) console.warn('[codex-web] SSE 连接异常，等待自动重连', sessionId, error) } }
+      source.onopen = () => { if (this.socket === source) { this.socketOpen = true; if (this.socketRetryTimer) { clearTimeout(this.socketRetryTimer); this.socketRetryTimer = null } } }
+      source.onerror = error => { if (this.socket === source) { this.socketOpen = false; this.recoverSocketAuth(); this.scheduleSocketReconnect(sessionId, source); if (window.console) console.warn('[codex-web] SSE 连接异常，等待自动重连', sessionId, error) } }
       source.onmessage = message => {
         try {
           const event = JSON.parse(message.data)
-          if (event.type === 'stream.ready') { if (event.sessionId === this.currentSession?.id) this.socketOpen = true; return }
+          if (this.socket === source) this.socketOpen = true
+          if (event.type === 'stream.ready') return
           if (event.sessionId === this.currentSession?.id) this.applyEvent(event, false)
         } catch (e) {}
       }
