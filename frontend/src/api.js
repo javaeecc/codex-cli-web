@@ -9,8 +9,6 @@ export default {
   logout: () => client.post('/auth/logout'),
   health: () => client.get('/health'),
   runtime: () => client.get('/runtime'),
-  runtimeStart: () => client.post('/runtime/start'),
-  runtimeStop: () => client.post('/runtime/stop'),
   settings: () => client.get('/settings'),
   updateSettings: payload => client.put('/settings', payload),
   projects: () => client.get('/projects'),

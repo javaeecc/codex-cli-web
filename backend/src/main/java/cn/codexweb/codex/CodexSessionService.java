@@ -49,7 +49,6 @@ public class CodexSessionService implements CodexProtocolClient.Listener {
     private final Map<String, Long> threadRecoveryAttempts = new ConcurrentHashMap<String, Long>();
     private final Map<String, QueuedTurn> activeQueuedTurns = new ConcurrentHashMap<String, QueuedTurn>();
     private final Map<String, Long> lastProgress = new ConcurrentHashMap<String, Long>();
-    private final Map<String, Object> sessionLocks = new ConcurrentHashMap<String, Object>();
     private final Map<String, HistoryCacheEntry> historyCache = new ConcurrentHashMap<String, HistoryCacheEntry>();
     private final ExecutorService notificationExecutor = Executors.newSingleThreadExecutor(r -> {
         Thread thread = new Thread(r, "codex-event-handler");
@@ -301,7 +300,9 @@ public class CodexSessionService implements CodexProtocolClient.Listener {
         if (queuedTurn != null) activeQueuedTurns.put(session.id, queuedTurn);
         log.info("回合启动: sessionId={}, threadId={}, generation={}, queued={}, needsThread={}", session.id, session.codexThreadId, generation, queuedTurn != null, needsThread);
         sessions.save(session);
-        append(session, "turn.started", map("text", text));
+        Map<String, Object> startedData = map("text", text);
+        if (queuedTurn != null) startedData.put("queueId", queuedTurn.id);
+        append(session, "turn.started", startedData);
         try {
             if (needsThread) {
                 AppSettings settings = appSettings.get();
@@ -631,6 +632,7 @@ public class CodexSessionService implements CodexProtocolClient.Listener {
 
     public void approval(String sessionId, Long requestId, String decision) {
         requireSession(sessionId);
+        if (requestId == null) throw new ApiException(HttpStatus.BAD_REQUEST, "APPROVAL_REQUEST_ID_REQUIRED", "审批请求编号缺失");
         CodexProtocolClient client = processManager.client(); if (client == null) throw new ApiException(HttpStatus.SERVICE_UNAVAILABLE, "CODEX_NOT_RUNNING", "Codex 尚未运行");
         String method = "";
         Map<String, Object> result = new LinkedHashMap<String, Object>();
@@ -663,7 +665,7 @@ public class CodexSessionService implements CodexProtocolClient.Listener {
             if (normalized != null) log.warn("收到无法匹配会话的 Codex 事件: method={}, normalized={}, threadId={}, requestId={}", method, normalized, threadId, requestId);
             return;
         }
-        synchronized (sessionLock(session.id)) {
+        synchronized (this) {
             Session latest = sessions.find(session.id);
             if (latest == null) return;
             if (threadId != null && latest.codexThreadId == null) {
@@ -715,6 +717,8 @@ public class CodexSessionService implements CodexProtocolClient.Listener {
             String turnId = eventTurnId;
             if (turnId != null) session.currentTurnId = turnId;
             session.steeringAvailable = true;
+            QueuedTurn activeQueued = activeQueuedTurns.get(session.id);
+            if (activeQueued != null) data.put("queueId", activeQueued.id);
             updateStatus(session, "RUNNING");
         }
         if (normalized.equals("approval.request")) updateStatus(session, "WAITING_APPROVAL");
@@ -745,7 +749,7 @@ public class CodexSessionService implements CodexProtocolClient.Listener {
     }
 
     @Override
-    public void onClosed(String reason) {
+    public synchronized void onClosed(String reason) {
         log.error("Codex app-server 连接关闭: reason={}", reason);
         for (Session session : sessions.all()) if ("RUNNING".equals(session.status) || "WAITING_APPROVAL".equals(session.status)) {
             if (session.codexThreadId != null) threadSessions.remove(session.codexThreadId, session.id);
@@ -763,7 +767,7 @@ public class CodexSessionService implements CodexProtocolClient.Listener {
         for (Session session : sessions.all()) {
             Long progress = lastProgress.get(session.id);
             if (!"RUNNING".equals(session.status) || progress == null || now - progress < STALL_TIMEOUT_MILLIS) continue;
-            synchronized (sessionLock(session.id)) {
+            synchronized (this) {
                 Session latest = sessions.find(session.id);
                 Long latestProgress = lastProgress.get(session.id);
                 if (latest == null || !"RUNNING".equals(latest.status) || latestProgress == null || now - latestProgress < STALL_TIMEOUT_MILLIS) continue;
@@ -832,7 +836,10 @@ public class CodexSessionService implements CodexProtocolClient.Listener {
         if (session.queuedTurns == null) session.queuedTurns = new java.util.ArrayList<QueuedTurn>();
         if (findQueued(session, queued.id) == null) {
             session.queuedTurns.add(0, queued);
-            append(session, "turn.queued", map("text", queued.text));
+            sessions.save(session);
+            Map<String, Object> queuedData = map("text", queued.text);
+            queuedData.put("queueId", queued.id);
+            append(session, "turn.queued", queuedData);
         }
     }
     private boolean isTerminal(String status) { return "COMPLETED".equals(status) || "CANCELLED".equals(status) || "FAILED".equals(status); }
@@ -863,7 +870,6 @@ public class CodexSessionService implements CodexProtocolClient.Listener {
         if (value == null) value = findText(node == null ? null : node.get("thread"), "id");
         return value;
     }
-    private Object sessionLock(String sessionId) { return sessionLocks.computeIfAbsent(sessionId, key -> new Object()); }
     private boolean isTimeout(Throwable failure) {
         Throwable current = failure;
         while (current != null) {

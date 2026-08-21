@@ -6,7 +6,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 
 import java.io.IOException;
-import java.nio.charset.Charset;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
@@ -18,6 +18,7 @@ import java.util.stream.Collectors;
 
 @Service
 public class ProjectFileService {
+    private static final long MAX_PREVIEW_BYTES = 2L * 1024L * 1024L;
     private final WorkspaceGuard guard;
     public ProjectFileService(WorkspaceGuard guard) { this.guard = guard; }
 
@@ -41,11 +42,12 @@ public class ProjectFileService {
         if (!Files.isRegularFile(file)) throw new ApiException(HttpStatus.NOT_FOUND, "FILE_NOT_FOUND", "文件不存在");
         try {
             long size = Files.size(file);
+            if (size > MAX_PREVIEW_BYTES) throw new ApiException(HttpStatus.PAYLOAD_TOO_LARGE, "FILE_PREVIEW_TOO_LARGE", "文件超过 2 MB，不能预览");
             Map<String, Object> result = new HashMap<String, Object>();
             result.put("path", project.relativize(file).toString().replace('\\', '/'));
             result.put("size", size);
-            if (size > 1024 * 1024 || isBinary(file)) { result.put("binary", true); result.put("content", ""); }
-            else { result.put("binary", false); result.put("content", new String(Files.readAllBytes(file), Charset.defaultCharset())); }
+            result.put("binary", false);
+            result.put("content", new String(Files.readAllBytes(file), StandardCharsets.UTF_8));
             return result;
         } catch (IOException exception) { throw new ApiException(HttpStatus.INTERNAL_SERVER_ERROR, "FILE_READ_FAILED", "无法读取文件"); }
     }
@@ -54,19 +56,19 @@ public class ProjectFileService {
         Map<String, Object> item = new HashMap<String, Object>();
         item.put("name", path.getFileName().toString());
         item.put("path", project.relativize(path).toString().replace('\\', '/'));
-        item.put("directory", Files.isDirectory(path));
-        try { item.put("size", Files.isDirectory(path) ? 0L : Files.size(path)); } catch (IOException ignored) { item.put("size", 0L); }
+        boolean directory = Files.isDirectory(path);
+        item.put("directory", directory);
+        if (!directory) {
+            try {
+                long size = Files.size(path);
+                item.put("size", size);
+                item.put("viewable", size <= MAX_PREVIEW_BYTES);
+            } catch (IOException ignored) { item.put("size", 0L); item.put("viewable", false); }
+        }
         return item;
     }
 
     private void requireInside(Path project, Path path) {
         if (!path.startsWith(project)) throw new ApiException(HttpStatus.BAD_REQUEST, "INVALID_FILE_PATH", "文件路径不合法");
-    }
-
-    private boolean isBinary(Path path) throws IOException {
-        byte[] data = Files.readAllBytes(path);
-        int length = Math.min(data.length, 8192);
-        for (int i = 0; i < length; i++) if (data[i] == 0) return true;
-        return false;
     }
 }

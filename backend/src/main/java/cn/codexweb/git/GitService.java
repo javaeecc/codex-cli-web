@@ -9,7 +9,7 @@ import org.springframework.stereotype.Service;
 import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStreamReader;
-import java.nio.charset.Charset;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
@@ -84,10 +84,10 @@ public class GitService {
 
     public String diff(String rawPath, String file) {
         Path path = guard.requireDirectory(rawPath);
-        if (file == null || file.trim().isEmpty()) return limit(run(path, "diff", "--no-ext-diff").stdout);
+        if (file == null || file.trim().isEmpty()) return limit(run(path, "diff", "--no-ext-diff", "--unified=999999").stdout);
         Path target = path.resolve(file).normalize();
         if (!target.startsWith(path)) throw new ApiException(HttpStatus.BAD_REQUEST, "INVALID_FILE_PATH", "文件路径不合法");
-        return limit(run(path, "diff", "--no-ext-diff", "--", path.relativize(target).toString()).stdout);
+        return limit(run(path, "diff", "--no-ext-diff", "--unified=999999", "--", path.relativize(target).toString()).stdout);
     }
 
     private String limit(String value) { return value.length() <= properties.getDiffMaxBytes() ? value : value.substring(0, properties.getDiffMaxBytes()) + "\n[Diff 已达到返回上限]"; }
@@ -97,7 +97,7 @@ public class GitService {
         command.add("git"); command.addAll(java.util.Arrays.asList(args));
         try {
             Process process = new ProcessBuilder(command).directory(directory.toFile()).redirectErrorStream(true).start();
-            BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream(), Charset.defaultCharset()));
+            BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream(), StandardCharsets.UTF_8));
             StringBuilder output = new StringBuilder(); String line;
             while ((line = reader.readLine()) != null) output.append(line).append('\n');
             int exit = process.waitFor();
