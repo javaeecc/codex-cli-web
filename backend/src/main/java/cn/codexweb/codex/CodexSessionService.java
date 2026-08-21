@@ -152,8 +152,6 @@ public class CodexSessionService implements CodexProtocolClient.Listener {
             }
             if ("tool.call.started".equals(event.type) || "tool.call.output".equals(event.type) || "tool.call.completed".equals(event.type)) {
                 Map<String, Object> eventPayload = mapValue(event.data, "payload");
-                Map<String, Object> eventItem = eventPayload == null ? null : mapValue(eventPayload, "item");
-                if (eventItem == null || !"agentMessage".equals(String.valueOf(eventItem.get("type")))) continue;
                 String rawId = eventValue(event, "itemId");
                 if (rawId == null) rawId = eventValue(event, "callId");
                 String key = "tool:" + event.type + ":" + (rawId == null ? event.id : rawId);
@@ -199,20 +197,36 @@ public class CodexSessionService implements CodexProtocolClient.Listener {
 
     private Map<String, Object> compactToolData(StoredEvent event) {
         Map<String, Object> data = new LinkedHashMap<String, Object>();
+        copyValue(event.data, data, "method");
         copyValue(event.data, data, "text");
         copyValue(event.data, data, "itemId");
         copyValue(event.data, data, "phase");
+        copyValue(event.data, data, "command");
+        copyValue(event.data, data, "output");
+        copyValue(event.data, data, "aggregatedOutput");
+        copyValue(event.data, data, "exitCode");
+        copyValue(event.data, data, "status");
         Map<String, Object> payload = mapValue(event.data, "payload");
         if (payload != null) {
             Map<String, Object> compactPayload = new LinkedHashMap<String, Object>();
             copyValue(payload, compactPayload, "itemId");
             copyValue(payload, compactPayload, "callId");
+            copyValue(payload, compactPayload, "command");
+            copyValue(payload, compactPayload, "output");
+            copyValue(payload, compactPayload, "aggregatedOutput");
+            copyValue(payload, compactPayload, "exitCode");
+            copyValue(payload, compactPayload, "status");
             Map<String, Object> item = mapValue(payload, "item");
             if (item != null) {
                 Map<String, Object> compactItem = new LinkedHashMap<String, Object>();
                 copyValue(item, compactItem, "id");
                 copyValue(item, compactItem, "type");
                 copyValue(item, compactItem, "phase");
+                copyValue(item, compactItem, "command");
+                copyValue(item, compactItem, "output");
+                copyValue(item, compactItem, "aggregatedOutput");
+                copyValue(item, compactItem, "exitCode");
+                copyValue(item, compactItem, "status");
                 compactPayload.put("item", compactItem);
             }
             data.put("payload", compactPayload);

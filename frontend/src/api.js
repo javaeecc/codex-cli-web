@@ -3,12 +3,24 @@ import axios from 'axios'
 const client = axios.create({ baseURL: '/api', timeout: 30000, withCredentials: true })
 const urlToken = new URLSearchParams(location.search).get('token')
 if (urlToken) client.defaults.headers.common['X-Codex-Token'] = urlToken
+const AUTH_EXPIRED_EVENT = 'codex-web-auth-expired'
+
+client.interceptors.response.use(response => response, error => {
+  const status = error && error.response && error.response.status
+  const url = error && error.config && error.config.url ? error.config.url : ''
+  if (status === 401 && !url.includes('/auth/login') && !url.includes('/auth/logout') && !url.includes('/health')) window.dispatchEvent(new Event(AUTH_EXPIRED_EVENT))
+  return Promise.reject(error)
+})
+
 export default {
+  onAuthExpired: handler => { window.addEventListener(AUTH_EXPIRED_EVENT, handler); return () => window.removeEventListener(AUTH_EXPIRED_EVENT, handler) },
+  notifyAuthExpired: () => window.dispatchEvent(new Event(AUTH_EXPIRED_EVENT)),
   authMe: () => client.get('/auth/me'),
   login: payload => client.post('/auth/login', payload),
   logout: () => client.post('/auth/logout'),
   health: () => client.get('/health'),
   runtime: () => client.get('/runtime'),
+  startRuntime: () => client.post('/runtime/start'),
   settings: () => client.get('/settings'),
   updateSettings: payload => client.put('/settings', payload),
   projects: () => client.get('/projects'),

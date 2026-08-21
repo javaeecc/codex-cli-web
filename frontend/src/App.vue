@@ -63,7 +63,41 @@
         <div class="message-scroll" ref="messageScroll" v-if="currentSession" @scroll="handleMessageScroll">
           <div v-if="!messages.length" class="first-prompt"><span class="prompt-kicker">{{ currentProject ? currentProject.name : 'Codex' }}</span><h2>你想处理什么？</h2><p>可以从查看项目结构、解释代码或修改功能开始。</p></div>
           <div v-for="(message, index) in displayMessages" :key="message.id || index" class="message-block" :class="message.role">
-            <details v-if="message.role === 'thinking'" class="thinking-block" :open="message.thinkingOpen" @toggle="setThinkingOpen(message, $event)"><summary><i class="el-icon-caret-right"></i><span>思考过程</span><span v-if="message.streaming" class="thinking-live">正在思考</span></summary><div class="thinking-content markdown-body" v-html="renderMarkdown(message.text)"></div></details>
+            <details v-if="message.role === 'overall-group'" class="overall-thought activity-block" :open="overallOpen(message)" @toggle="setOverallOpen(message, $event)">
+              <summary>
+                <i :class="isOverallGroupActive(message) ? 'el-icon-loading' : 'el-icon-cpu'"></i>
+                <span class="activity-title">总体思考</span>
+                <span class="activity-state">{{ overallGroupStatus(message) }}</span>
+              </summary>
+              <div class="overall-thought-content">
+                <template v-for="item in message.items">
+                  <details v-if="item.role === 'thinking'" :key="item.id" class="thinking-block" :open="item.thinkingOpen" @toggle="setThinkingOpen(item, $event)"><summary><i class="el-icon-caret-right"></i><span>思考过程</span><span class="activity-state">{{ thinkingStatus(item) }}</span></summary><div class="thinking-content markdown-body" v-html="renderMarkdown(item.text)"></div></details>
+                  <template v-else-if="item.role === 'tool-group'">
+                    <details :key="item.id" class="work-process-group">
+                      <summary><i :class="isToolGroupActive(item) ? 'el-icon-loading' : 'el-icon-cpu'"></i><span class="activity-title">工作过程</span><span class="activity-count">{{ item.activities.length }} 项操作</span><span class="activity-state">{{ toolGroupStatus(item) }}</span></summary>
+                      <div class="activity-group-list">
+                        <details v-for="activity in item.activities" :key="activity.id" class="activity-entry">
+                          <summary class="activity-entry-heading">
+                            <i :class="activity.state === '运行中' ? 'el-icon-loading' : 'el-icon-cpu'"></i>
+                            <span class="activity-title">{{ activity.title }}</span>
+                            <span class="activity-state">{{ activityStatus(activity) }}</span>
+                          </summary>
+                          <div v-if="activity.command" class="activity-section">
+                            <span class="activity-label">命令</span>
+                            <pre class="activity-code">{{ activity.command }}</pre>
+                          </div>
+                          <div v-if="activity.output" class="activity-section">
+                            <span class="activity-label">输出</span>
+                            <pre class="activity-output">{{ activity.output }}</pre>
+                          </div>
+                          <div v-if="activity.exitCode !== null && activity.exitCode !== undefined" class="activity-exit-code">退出码 {{ activity.exitCode }}</div>
+                        </details>
+                      </div>
+                    </details>
+                  </template>
+                </template>
+              </div>
+            </details>
             <div v-if="message.role === 'user'" class="message-meta"><span class="avatar user">你</span><strong>你</strong><span>{{ formatTime(message.timestamp) }}</span></div>
             <div v-if="message.role === 'assistant'" class="markdown-body" v-html="renderMarkdown(message.text)"></div>
             <div v-else-if="message.role === 'user'" class="user-message">{{ message.text }}</div>
@@ -103,7 +137,7 @@ import { marked } from 'marked'
 import DOMPurify from 'dompurify'
 
 export default {
-  data () { return { authReady: false, authenticated: false, loginForm: { username: '', password: '' }, loginLoading: false, loginError: '', authSyncInFlight: false, projects: [], sessions: [], currentProject: null, currentSession: null, runtime: { running: false }, runtimeTimer: null, settings: { approvalPolicy: 'on-request', model: '', reasoningEffort: '' }, settingsDialog: false, settingsSaving: false, diffDialog: false, diffLoading: false, fileDialog: false, filePreviewLoading: false, socket: null, socketOpen: false, socketRetryTimer: null, socketHealthTimer: null, lastSocketActivityAt: 0, leftCollapsed: false, rightCollapsed: true, activeTab: 'changes', tabs: [{ id: 'changes', label: 'Changes' }, { id: 'files', label: 'Files' }], messages: [], itemPhases: {}, activities: [], liveStatus: '', draft: '', lastDraft: '', sending: false, deletingQueueId: null, running: false, activeTurnText: '', errorMessage: '', gitFiles: [], currentBranch: '', branches: [], diffText: '', diffExpandedSections: {}, selectedFile: '', fileContent: null, fileItems: [], fileChildrenCache: {}, fileLoadingPaths: {}, fileTreeGeneration: 0, expandedPaths: {}, workspaceDialog: false, workspaceRoots: [], workspaceItems: [], workspacePath: '', workspaceParent: '', selectedWorkspace: '', approvalDialog: false, approvalRequestId: null, approvalCommand: '', composerFocused: false, showArchived: false, sessionSearch: '', attachments: [], statusTimer: null, statusSyncInFlight: false, sessionLoadController: null, sessionLoadGeneration: 0, markdownCache: null, lastEventId: '', seenEventIds: {}, followOutput: true } },
+  data () { return { authReady: false, authenticated: false, loginForm: { username: '', password: '' }, loginLoading: false, loginError: '', authSyncInFlight: false, authExpiredHandled: false, authExpiredCleanup: null, projects: [], sessions: [], currentProject: null, currentSession: null, runtime: { running: false }, runtimeTimer: null, displayNow: Date.now(), displayClockTimer: null, settings: { approvalPolicy: 'on-request', model: '', reasoningEffort: '' }, settingsDialog: false, settingsSaving: false, diffDialog: false, diffLoading: false, fileDialog: false, filePreviewLoading: false, socket: null, socketOpen: false, socketRetryTimer: null, socketHealthTimer: null, lastSocketActivityAt: 0, leftCollapsed: false, rightCollapsed: true, activeTab: 'changes', tabs: [{ id: 'changes', label: 'Changes' }, { id: 'files', label: 'Files' }], messages: [], itemPhases: {}, activities: [], liveStatus: '', draft: '', lastDraft: '', sending: false, deletingQueueId: null, running: false, activeTurnText: '', errorMessage: '', gitFiles: [], currentBranch: '', branches: [], diffText: '', diffExpandedSections: {}, selectedFile: null, fileContent: null, fileItems: [], fileChildrenCache: {}, fileLoadingPaths: {}, fileTreeGeneration: 0, expandedPaths: {}, workspaceDialog: false, workspaceRoots: [], workspaceItems: [], workspacePath: '', workspaceParent: '', selectedWorkspace: '', approvalDialog: false, approvalRequestId: null, approvalCommand: '', composerFocused: false, showArchived: false, sessionSearch: '', attachments: [], statusTimer: null, statusSyncInFlight: false, sessionLoadController: null, sessionLoadGeneration: 0, markdownCache: null, lastEventId: '', seenEventIds: {}, overallOpenState: {}, followOutput: true } },
   computed: {
     visibleSessions () {
       const query = this.sessionSearch.trim().toLowerCase()
@@ -121,22 +155,68 @@ export default {
       const result = []
       let thinking = null
       this.messages.forEach(message => {
-        if (message.role === 'assistant' && message.phase !== 'final_answer') {
+        if (message.role === 'turn-start' || message.role === 'turn-end') {
+          thinking = null
+          result.push(message)
+        } else if (message.role === 'tool') {
+          const previous = result[result.length - 1]
+          if (previous && previous.role === 'tool-group') {
+            previous.activities.push(message.activity)
+            if (message.activity.state === '运行中') previous.state = '运行中'
+          } else {
+            result.push({ id: `tool-group-${message.id}`, role: 'tool-group', activities: [message.activity], state: message.activity.state, startedAt: message.activity.startedAt })
+          }
+          thinking = null
+        } else if (message.role === 'assistant' && message.phase !== 'final_answer') {
           if (!thinking) {
-            thinking = { id: `thinking-${message.id}`, role: 'thinking', text: '', streaming: false, thinkingOpen: false, sourceIds: [] }
+            thinking = { id: `thinking-${message.id}`, role: 'thinking', text: '', streaming: false, thinkingOpen: false, sourceIds: [], startedAt: this.eventTime(message.timestamp), endedAt: null }
             result.push(thinking)
           }
           if (thinking.text && message.text) thinking.text += '\n\n'
           thinking.text += message.text || ''
           thinking.streaming = thinking.streaming || !!message.streaming
           thinking.thinkingOpen = thinking.thinkingOpen || !!message.thinkingOpen
+          thinking.endedAt = this.eventTime(message.timestamp)
           thinking.sourceIds.push(message.id)
         } else {
+          if (message.role === 'assistant' && message.phase === 'final_answer' && thinking) thinking.streaming = false
           thinking = null
           result.push(message)
         }
       })
-      return result
+      const wrapped = []
+      let turnStartAt = null
+      let currentGroup = null
+      let lastGroup = null
+      result.forEach(item => {
+        if (item.role === 'turn-start') {
+          turnStartAt = this.eventTime(item.timestamp)
+          currentGroup = null
+          lastGroup = null
+        } else if (item.role === 'turn-end') {
+          if (lastGroup) lastGroup.endedAt = this.eventTime(item.timestamp)
+          turnStartAt = null
+          currentGroup = null
+          lastGroup = null
+        } else if (item.role === 'thinking' || item.role === 'tool-group') {
+          if (!currentGroup) {
+            currentGroup = { id: `overall-${item.id}`, role: 'overall-group', items: [], startedAt: turnStartAt || item.startedAt || item.timestamp }
+            lastGroup = currentGroup
+            wrapped.push(currentGroup)
+          }
+          currentGroup.items.push(item)
+        } else {
+          wrapped.push(item)
+          if (item.role === 'user') {
+            currentGroup = null
+            lastGroup = null
+          } else if (item.role === 'assistant' && item.phase === 'final_answer') {
+            if (currentGroup && !this.sessionHasPendingWork(this.currentSession)) currentGroup.endedAt = this.eventTime(item.timestamp)
+            currentGroup = null
+          }
+        }
+      })
+      return wrapped
     },
     diffLines () {
       const source = String(this.diffText || '')
@@ -203,8 +283,8 @@ export default {
       return rows
     }
   },
-  mounted () { this.checkAuth() },
-  beforeDestroy () { this.closeSocket(); if (this.sessionLoadController) this.sessionLoadController.abort(); this.stopStatusPolling(); this.stopRuntimePolling() },
+  mounted () { this.displayClockTimer = setInterval(() => { this.displayNow = Date.now() }, 1000); this.authExpiredCleanup = api.onAuthExpired(() => this.handleAuthExpired()); this.checkAuth() },
+  beforeDestroy () { if (this.displayClockTimer) clearInterval(this.displayClockTimer); if (this.authExpiredCleanup) this.authExpiredCleanup(); this.closeSocket(); if (this.sessionLoadController) this.sessionLoadController.abort(); this.stopStatusPolling(); this.stopRuntimePolling() },
   methods: {
     async checkAuth () {
       try {
@@ -219,10 +299,12 @@ export default {
           return
         }
         await api.authMe()
+        this.authExpiredHandled = false
         this.authenticated = true
         await this.refreshAll()
       } catch (e) {
         this.authenticated = false
+        if (this.authExpiredHandled) return
         const saved = this.loadSavedCredentials()
         if (saved) {
           this.loginForm.username = saved.username
@@ -241,6 +323,7 @@ export default {
         await api.login(this.loginForm)
         try { localStorage.removeItem('codex-web-explicit-logout') } catch (e) {}
         this.saveCredentials()
+        this.authExpiredHandled = false
         this.authenticated = true
         this.loginForm.password = ''
         await this.refreshAll()
@@ -286,9 +369,50 @@ export default {
       this.sessions = []
       this.messages = []
     },
-    async refreshAll () { try { const [projects, runtime, settings] = await Promise.all([api.projects(), api.runtime(), api.settings()]); this.projects = projects.data; this.runtime = runtime.data; this.settings = settings.data; this.startRuntimePolling(); if (this.currentProject) { const found = this.projects.find(p => p.id === this.currentProject.id); if (found) await this.selectProject(found) } else if (this.projects.length) await this.selectProject(this.projects[0]) } catch (e) { this.notifyError(e) } },
+    handleAuthExpired () {
+      if (this.authExpiredHandled) return
+      this.authExpiredHandled = true
+      this.authenticated = false
+      this.authReady = true
+      this.loginError = '服务器会话已失效，请重新登录'
+      try { localStorage.setItem('codex-web-explicit-logout', 'true') } catch (e) {}
+      this.settingsDialog = false
+      this.closeSocket()
+      this.stopStatusPolling()
+      this.stopRuntimePolling()
+      const saved = this.loadSavedCredentials()
+      if (saved) {
+        this.loginForm.username = saved.username
+        this.loginForm.password = saved.password
+      }
+      this.currentProject = null
+      this.currentSession = null
+      this.projects = []
+      this.sessions = []
+      this.messages = []
+    },
+    async refreshAll () {
+      try {
+        const [projects, runtime, settings] = await Promise.all([api.projects(), api.runtime(), api.settings()])
+        this.projects = projects.data
+        this.runtime = runtime.data
+        this.settings = settings.data
+        if (!this.runtime.running) {
+          try {
+            this.runtime = (await api.startRuntime()).data
+          } catch (startError) {
+            this.notifyError(startError)
+          }
+        }
+        this.startRuntimePolling()
+        if (this.currentProject) {
+          const found = this.projects.find(p => p.id === this.currentProject.id)
+          if (found) await this.selectProject(found)
+        } else if (this.projects.length) await this.selectProject(this.projects[0])
+      } catch (e) { this.notifyError(e) }
+    },
     async selectProject (project) { this.stopStatusPolling(); this.closeSocket(); this.currentProject = project; this.currentSession = null; this.messages = []; this.sessions = []; this.leftCollapsed = true; try { const result = await api.sessions(project.id); this.sessions = result.data; await Promise.all([this.refreshGit(), this.loadFiles()]); if (this.sessions.length) await this.selectSession(this.visibleSessions[0] || this.sessions[0]) } catch (e) { this.notifyError(e) } },
-    async selectSession (session) { this.stopStatusPolling(); if (this.sessionLoadController) this.sessionLoadController.abort(); const generation = this.sessionLoadGeneration + 1; this.sessionLoadGeneration = generation; const controller = new AbortController(); this.sessionLoadController = controller; this.closeSocket(); this.currentSession = session; this.lastDraft = session.lastUserMessage || ''; this.approvalDialog = false; this.approvalRequestId = null; this.approvalCommand = ''; this.followOutput = true; this.errorMessage = ''; this.messages = []; this.activities = []; this.liveStatus = ''; this.activeTurnText = ''; this.diffText = ''; this.selectedFile = ''; this.fileContent = null; this.seenEventIds = {}; this.lastEventRecoveryAt = 0; this.lastEventId = ''; this.leftCollapsed = true; try { const result = await api.history(session.id, { signal: controller.signal }); if (generation !== this.sessionLoadGeneration || !this.currentSession || this.currentSession.id !== session.id) return; const history = result.data || {}; (history.events || []).forEach(event => this.applyEvent(event, true)); this.lastEventId = history.lastEventId || this.lastEventId; this.running = this.sessionHasPendingWork(this.currentSession); if (this.running && !this.liveStatus) this.liveStatus = this.currentSession.status === 'WAITING_APPROVAL' ? '等待审批' : (this.hasQueuedTurns(this.currentSession) ? '队列处理中' : '正在思考'); this.connectSocket(session.id); const recovery = await api.events(session.id, this.lastEventId); if (generation !== this.sessionLoadGeneration || !this.currentSession || this.currentSession.id !== session.id) return; recovery.data.forEach(event => this.applyEvent(event, false)); this.startStatusPolling(session.id); this.scrollToBottomAfterRender() } catch (e) { if (e && e.code === 'ERR_CANCELED') return; if (generation === this.sessionLoadGeneration) this.notifyError(e) } finally { if (this.sessionLoadController === controller) this.sessionLoadController = null } },
+    async selectSession (session) { this.stopStatusPolling(); if (this.sessionLoadController) this.sessionLoadController.abort(); const generation = this.sessionLoadGeneration + 1; this.sessionLoadGeneration = generation; const controller = new AbortController(); this.sessionLoadController = controller; this.closeSocket(); this.currentSession = session; this.lastDraft = session.lastUserMessage || ''; this.clearApprovalState(); this.followOutput = true; this.errorMessage = ''; this.messages = []; this.activities = []; this.overallOpenState = {}; this.liveStatus = ''; this.activeTurnText = ''; this.diffText = ''; this.selectedFile = ''; this.fileContent = null; this.seenEventIds = {}; this.lastEventRecoveryAt = 0; this.lastEventId = ''; this.leftCollapsed = true; try { const result = await api.history(session.id, { signal: controller.signal }); if (generation !== this.sessionLoadGeneration || !this.currentSession || this.currentSession.id !== session.id) return; const history = result.data || {}; (history.events || []).forEach(event => this.applyEvent(event, true)); this.lastEventId = history.lastEventId || this.lastEventId; this.running = this.sessionHasPendingWork(this.currentSession); if (this.running && !this.liveStatus) this.liveStatus = this.currentSession.status === 'WAITING_APPROVAL' ? '等待审批' : (this.hasQueuedTurns(this.currentSession) ? '队列处理中' : '正在思考'); this.connectSocket(session.id); const recovery = await api.events(session.id, this.lastEventId); if (generation !== this.sessionLoadGeneration || !this.currentSession || this.currentSession.id !== session.id) return; recovery.data.forEach(event => this.applyEvent(event, false)); this.startStatusPolling(session.id); this.scrollToBottomAfterRender() } catch (e) { if (e && e.code === 'ERR_CANCELED') return; if (generation === this.sessionLoadGeneration) this.notifyError(e) } finally { if (this.sessionLoadController === controller) this.sessionLoadController = null } },
     async createSession () { if (!this.currentProject) return; try { const result = await api.createSession(this.currentProject.id, { title: '新建会话' }); this.sessions.unshift(result.data); await this.selectSession(result.data) } catch (e) { this.notifyError(e) } },
     async toggleSessionArchive (session) {
       if (!session) return
@@ -449,13 +573,24 @@ export default {
        this.socket = null
        this.socketOpen = false
      },
-    scheduleSocketReconnect (sessionId, source) { if (this.socketRetryTimer) clearTimeout(this.socketRetryTimer); this.socketRetryTimer = setTimeout(() => { this.socketRetryTimer = null; if (this.socket === source && !this.socketOpen) this.connectSocket(sessionId) }, 5000) },
-    connectSocket (sessionId) {
+     scheduleSocketReconnect (sessionId, source) { if (this.socketRetryTimer) clearTimeout(this.socketRetryTimer); this.socketRetryTimer = setTimeout(() => { this.socketRetryTimer = null; if (this.socket === source && !this.socketOpen) this.connectSocket(sessionId) }, 5000) },
+     async restoreToolActivities (sessionId) {
+       if (this.activities.some(activity => activity.command)) return
+       try {
+         const result = await api.events(sessionId)
+         if (!this.currentSession || this.currentSession.id !== sessionId) return
+         ;(result.data || []).forEach(event => {
+           if (event && ['tool.call.started', 'tool.call.output', 'tool.call.completed'].includes(event.type)) this.applyEvent(event, true)
+         })
+       } catch (e) {}
+     },
+     connectSocket (sessionId) {
       if (!sessionId) {
         this.closeSocket()
         return
       }
-      if (this.socket) this.closeSocket()
+       this.restoreToolActivities(sessionId)
+       if (this.socket) this.closeSocket()
       const controller = new AbortController()
        const source = { readyState: 0, closed: false, close: () => { source.closed = true; source.readyState = 2; controller.abort() } }
        this.socket = source
@@ -473,7 +608,8 @@ export default {
         try {
           const response = await fetch(api.streamUrl(sessionId), { credentials: 'include', headers: { Accept: 'text/event-stream', 'Cache-Control': 'no-cache' }, signal: controller.signal })
           if (this.socket !== source) return
-          if (!response.ok) throw new Error(`SSE HTTP ${response.status}`)
+           if (response.status === 401) { api.notifyAuthExpired(); return }
+           if (!response.ok) throw new Error(`SSE HTTP ${response.status}`)
            source.readyState = 1
            this.socketOpen = true
            if (this.socketRetryTimer) { clearTimeout(this.socketRetryTimer); this.socketRetryTimer = null }
@@ -652,8 +788,11 @@ export default {
       box.scrollTo({ top: box.scrollHeight, behavior: 'auto' })
     },
     scrollToBottomAfterRender () { this.$nextTick(() => { this.scrollToBottom(); requestAnimationFrame(() => { this.scrollToBottom(); requestAnimationFrame(() => this.scrollToBottom()); setTimeout(() => this.scrollToBottom(), 100) }) }) },
-    async respondApproval (decision) { try { await api.respondApproval(this.currentSession.id, { requestId: this.approvalRequestId, decision }) } catch (e) { this.notifyError(e) } finally { this.approvalDialog = false; this.approvalRequestId = null } },
-    setThinkingOpen (group, event) { const open = event.target.open; (group.sourceIds || []).forEach(id => { const message = this.messages.find(item => item.id === id); if (message) this.$set(message, 'thinkingOpen', open) }) },
+    clearApprovalState () { this.approvalDialog = false; this.approvalRequestId = null; this.approvalCommand = '' },
+    async respondApproval (decision) { try { await api.respondApproval(this.currentSession.id, { requestId: this.approvalRequestId, decision }) } catch (e) { this.notifyError(e) } finally { this.clearApprovalState() } },
+    overallOpen (group) { return this.isOverallGroupActive(group) || this.overallOpenState[group.id] === true },
+    setOverallOpen (group, event) { if (!this.isOverallGroupActive(group)) this.$set(this.overallOpenState, group.id, event.target.open) },
+    setThinkingOpen (group, event) { const open = event.target.open; (group.sourceIds || []).forEach(id => { const message = this.messages.find(item => item.id === id); if (message) { this.$set(message, 'thinkingOpen', open); this.$set(message, 'thinkingOpenTouched', true) } }) },
     notifyError (error) { const message = error && error.response && error.response.data ? error.response.data.message : (error.message || '请求失败'); this.$message.error(message) }
     ,applyEvent (event, replay) {
       if (!event) return
@@ -663,6 +802,7 @@ export default {
       const data = event.data || {}
       const timestamp = event.timestamp || new Date().toISOString()
       if (type === 'turn.accepted') {
+        this.clearApprovalState()
         if (this.currentSession) {
           this.$set(this.currentSession, 'currentTurnId', data.turnId || null)
           this.$set(this.currentSession, 'status', 'RUNNING')
@@ -678,6 +818,7 @@ export default {
         this.running = true
         this.liveStatus = '正在思考'
       } else if (type === 'turn.started') {
+        this.clearApprovalState()
         if (this.currentSession) this.$set(this.currentSession, 'status', 'RUNNING')
         const text = data.text || ''
         if (text) this.lastDraft = text
@@ -687,6 +828,7 @@ export default {
         }
         const last = this.messages[this.messages.length - 1]
         if (text && (!last || last.role !== 'user' || last.text !== text)) this.messages.push({ id: `user-event-${event.id || Date.now()}`, role: 'user', text, timestamp })
+        this.pushTurnMarker('turn-start', event, timestamp)
         this.activeTurnText = text || this.activeTurnText
         this.running = true
         this.liveStatus = '正在思考'
@@ -702,7 +844,7 @@ export default {
         }
         if (!last.itemId && itemId) this.$set(last, 'itemId', itemId)
         if (!last.phase && phase) this.$set(last, 'phase', phase)
-        if (phase !== 'final_answer') this.$set(last, 'thinkingOpen', true)
+        if (phase !== 'final_answer' && !last.thinkingOpenTouched) this.$set(last, 'thinkingOpen', true)
         if (phase === 'final_answer') this.messages.forEach(message => { if (message.role === 'assistant' && message.phase !== 'final_answer') this.$set(message, 'thinkingOpen', false) })
         last.text += text
         last.streaming = true
@@ -710,6 +852,7 @@ export default {
         this.errorMessage = ''
         this.liveStatus = '正在整理回复'
       } else if (type === 'turn.completed') {
+        this.clearApprovalState()
         if (this.currentSession) {
           this.$set(this.currentSession, 'currentTurnId', null)
           this.$set(this.currentSession, 'status', 'COMPLETED')
@@ -724,11 +867,14 @@ export default {
         this.errorMessage = ''
         if (!replay && queuedTurnCount === 0 && this.currentSession && Array.isArray(this.currentSession.queuedTurns)) this.currentSession.queuedTurns.splice(0, this.currentSession.queuedTurns.length)
         this.liveStatus = this.running ? '队列处理中' : ''
+        this.pushTurnMarker('turn-end', event, timestamp)
       } else if (type === 'turn.cancelled') {
+        this.clearApprovalState()
         if (this.currentSession) this.$set(this.currentSession, 'status', 'CANCELLED')
         this.running = this.hasQueuedTurns(this.currentSession)
         this.activeTurnText = ''
         this.liveStatus = this.running ? '队列处理中' : ''
+        this.pushTurnMarker('turn-end', event, timestamp)
       } else if (type === 'turn.steer.unavailable') {
         if (this.currentSession) this.$set(this.currentSession, 'steeringAvailable', false)
       } else if (type === 'turn.queue.error') {
@@ -739,11 +885,14 @@ export default {
         this.running = true
         this.liveStatus = '正在重新连接 Codex'
       } else if (type === 'tool.call.started' || type === 'tool.call.output' || type === 'tool.call.completed') {
-        const detail = data.text || (data.payload && (data.payload.command || data.payload.output)) || ''
         const payload = data.payload || {}
         const item = payload.item || {}
         const rawId = data.itemId || payload.itemId || item.id || payload.callId
         const phase = data.phase || item.phase || ''
+        const command = this.toolValue(payload.command || item.command || payload.cmd || item.cmd || data.command)
+        const output = this.toolValue(payload.output || payload.aggregatedOutput || item.output || item.aggregatedOutput || data.output || data.text)
+        const exitCode = payload.exitCode !== undefined ? payload.exitCode : item.exitCode
+        const title = this.toolTitle(data.method, payload, item, command)
         if (item.type === 'agentMessage' && rawId && phase) {
           this.$set(this.itemPhases, rawId, phase)
           const message = this.messages.find(entry => entry.itemId === rawId)
@@ -752,34 +901,43 @@ export default {
             if (phase !== 'final_answer') this.$set(message, 'thinkingOpen', true)
           }
         }
-        const existing = rawId && this.activities.find(activity => activity.rawId === rawId)
+        const eventAt = this.eventTime(timestamp)
+        const activityId = rawId || event.id || `${type}-${timestamp}`
+        const existing = this.activities.find(activity => activity.rawId === activityId)
         if (existing) {
-          existing.detail = String(detail)
+          if (command) existing.command = command
+          if (output) existing.output = output
+          if (exitCode !== undefined) existing.exitCode = exitCode
+          if (title !== '其他操作') existing.title = title
+          if (type.endsWith('completed')) this.$set(existing, 'completedAt', eventAt)
           existing.state = type.endsWith('completed') ? '完成' : '运行中'
         } else {
-          this.activities.push({ id: `${type}-${Date.now()}-${Math.random()}`, rawId, icon: 'el-icon-cpu', title: '操作', detail: String(detail).slice(0, 220), state: type.endsWith('completed') ? '完成' : '运行中' })
+          const activity = { id: `${type}-${Date.now()}-${Math.random()}`, rawId: activityId, icon: 'el-icon-cpu', title, command, output, exitCode, state: type.endsWith('completed') ? '完成' : '运行中', startedAt: eventAt, completedAt: type.endsWith('completed') ? eventAt : null }
+          this.activities.push(activity)
+          this.messages.push({ id: `tool-${activity.id}`, role: 'tool', timestamp, activity })
         }
-        this.running = true
-        this.liveStatus = type.endsWith('completed') ? '正在整理回复' : '正在执行操作'
+        if (!replay) {
+          this.running = true
+          this.liveStatus = type.endsWith('completed') ? '正在整理回复' : '正在执行操作'
+        }
       } else if (type === 'approval.request') {
-        const wasWaiting = !!(this.currentSession && this.currentSession.status === 'WAITING_APPROVAL')
-        if (!replay && this.currentSession) this.$set(this.currentSession, 'status', 'WAITING_APPROVAL')
+        if (this.currentSession) this.$set(this.currentSession, 'status', 'WAITING_APPROVAL')
         const payload = data.payload || {}
         this.approvalRequestId = data.requestId !== undefined && data.requestId !== null
           ? data.requestId
           : (payload.requestId !== undefined && payload.requestId !== null ? payload.requestId : null)
         this.approvalCommand = Array.isArray(payload.command) ? payload.command.join(' ') : (payload.command || payload.reason || '需要你的确认')
-        this.approvalDialog = !replay || wasWaiting
+        this.approvalDialog = true
         this.running = true
         this.liveStatus = '等待审批'
       } else if (type === 'approval.responded') {
-        this.approvalDialog = false
-        this.approvalRequestId = null
+        this.clearApprovalState()
         if (this.currentSession && this.currentSession.status === 'WAITING_APPROVAL') this.$set(this.currentSession, 'status', 'RUNNING')
       } else if (type === 'diff.updated') {
         const payload = data.payload || {}
         this.diffText = payload.diff || data.text || this.diffText
       } else if (type === 'error') {
+        this.clearApprovalState()
         if (data.payload && data.payload.willRetry) {
           if (this.currentSession) this.$set(this.currentSession, 'status', 'RUNNING')
           this.running = true
@@ -790,8 +948,117 @@ export default {
         this.errorMessage = data.text || (data.payload && data.payload.message) || data.message || 'Codex 运行失败'
         this.running = this.hasQueuedTurns(this.currentSession)
         this.liveStatus = this.running ? '队列处理中' : ''
+        this.pushTurnMarker('turn-end', event, timestamp)
       }
       if (!replay) this.$nextTick(this.scrollToBottom)
+    }
+    ,pushTurnMarker (role, event, timestamp) {
+      const id = `marker-${role}-${event && event.id ? event.id : timestamp}`
+      if (this.messages.some(message => message.id === id)) return
+      this.messages.push({ id, role, timestamp })
+    }
+    ,eventTime (value) {
+      if (typeof value === 'number' && Number.isFinite(value)) return value
+      const parsed = Date.parse(value || '')
+      return Number.isFinite(parsed) ? parsed : Date.now()
+    }
+    ,formatDuration (milliseconds) {
+      const seconds = Math.max(0, Math.round(milliseconds / 1000))
+      if (seconds < 1) return '<1 秒'
+      if (seconds < 60) return `${seconds} 秒`
+      const minutes = Math.floor(seconds / 60)
+      const remainder = seconds % 60
+      return remainder ? `${minutes} 分 ${remainder} 秒` : `${minutes} 分钟`
+    }
+    ,activityStatus (activity) {
+      if (!activity) return ''
+      if (activity.state === '运行中') return `正在工作 · ${this.durationText(activity.startedAt)}`
+      if (Number.isFinite(activity.startedAt) && Number.isFinite(activity.completedAt)) return `耗时 ${this.durationText(activity.startedAt, activity.completedAt)}`
+      return '已完成'
+    }
+    ,thinkingStatus (item) {
+      if (!item) return ''
+      if (item.streaming) return `正在工作 · ${this.durationText(item.startedAt)}`
+      if (Number.isFinite(item.startedAt) && Number.isFinite(item.endedAt)) return `耗时 ${this.durationText(item.startedAt, item.endedAt)}`
+      return '已完成'
+    }
+    ,toolGroupActivities (group) {
+      if (group && group.role === 'tool-group') return group.activities || []
+      const items = (group && group.items) || []
+      return items.reduce((all, item) => all.concat(item.role === 'tool-group' ? item.activities : []), [])
+    }
+    ,toolGroupStatus (group) {
+      const activities = this.toolGroupActivities(group)
+      const startedAt = activities.map(activity => activity.startedAt).filter(value => Number.isFinite(value))
+      const completedAt = activities.map(activity => activity.completedAt).filter(value => Number.isFinite(value))
+      const start = startedAt.length ? Math.min(...startedAt) : null
+      const end = completedAt.length === activities.length && completedAt.length ? Math.max(...completedAt) : null
+      const hasRunning = activities.some(activity => activity.state === '运行中')
+      if (this.currentSession && this.currentSession.status === 'WAITING_APPROVAL' && (hasRunning || completedAt.length < activities.length)) return `等待审批 · ${this.durationText(start)}`
+      if (hasRunning) return `正在工作 · ${this.durationText(start)}`
+      if (Number.isFinite(start) && Number.isFinite(end)) return `耗时 ${this.durationText(start, end)}`
+      return '已完成'
+    }
+    ,isToolGroupActive (group) {
+      return this.toolGroupActivities(group).some(activity => activity.state === '运行中')
+    }
+    ,overallGroupStatus (group) {
+      const start = this.eventTime(group && group.startedAt)
+      const active = this.isOverallGroupActive(group)
+      if (active && this.currentSession && this.currentSession.status === 'WAITING_APPROVAL') return `等待审批 · ${this.durationText(start)}`
+      if (active) return `正在工作 · ${this.durationText(start)}`
+      const end = Number.isFinite(group && group.endedAt) ? group.endedAt : this.overallGroupEndAt(group)
+      return Number.isFinite(end) ? `耗时 ${this.durationText(start, end)}` : '已完成'
+    }
+    ,isOverallGroupActive (group) {
+      if (!group) return false
+      if (Number.isFinite(group.endedAt)) return false
+      const items = group.items || []
+      return !!(this.sessionHasPendingWork(this.currentSession) || items.some(item => item.role === 'thinking' && item.streaming) || this.toolGroupActivities(group).some(activity => activity.state === '运行中'))
+    }
+    ,overallGroupEndAt (group) {
+      const values = (group && group.items ? group.items : []).reduce((all, item) => {
+        if (item.role === 'thinking' && Number.isFinite(item.endedAt)) all.push(item.endedAt)
+        if (item.role === 'tool-group') item.activities.forEach(activity => { if (Number.isFinite(activity.completedAt)) all.push(activity.completedAt) })
+        return all
+      }, [])
+      return values.length ? Math.max(...values) : null
+    }
+    ,durationText (startedAt, endedAt) {
+      if (!Number.isFinite(startedAt)) return '<1 秒'
+      const end = Number.isFinite(endedAt) ? endedAt : this.displayNow
+      return this.formatDuration(Math.max(0, end - startedAt))
+    }
+    ,toolValue (value) {
+      if (value === undefined || value === null || value === '') return ''
+      if (Array.isArray(value)) return value.join(' ')
+      if (typeof value === 'object') return JSON.stringify(value, null, 2)
+      return String(value)
+    }
+    ,toolTitle (method, payload, item, command) {
+      const type = String((item && item.type) || (payload && payload.type) || '').toLowerCase()
+      const eventMethod = String(method || '').toLowerCase()
+      const commandText = String(command || '').toLowerCase()
+      if (type.includes('command') || type.includes('shell') || eventMethod.includes('commandexecution') || eventMethod.includes('shellcommand')) return '执行命令'
+      if (type.includes('filechange') || type.includes('file_change') || type.includes('patch') || eventMethod.includes('filechange') || eventMethod.includes('applypatch')) return '修改文件'
+      if (type.includes('fileread') || type.includes('file_read') || type.includes('readfile') || eventMethod.includes('fileread') || eventMethod.includes('readfile')) return '查看文件'
+      if (type.includes('mcp')) return '调用 MCP 工具'
+      if (type.includes('websearch') || type.includes('webfetch') || eventMethod.includes('websearch') || eventMethod.includes('webfetch')) return '搜索网页'
+      if (type.includes('browser') || eventMethod.includes('browser')) return '浏览网页'
+      if (type.includes('image') || eventMethod.includes('image')) return '查看图片'
+      if (type.includes('todo') || type.includes('task')) return '更新任务'
+      if (type.includes('file') && (type.includes('read') || type.includes('open'))) return '查看文件'
+      if (type.includes('file') || type.includes('write')) return '文件操作'
+      if (/\b(rg|grep|findstr|select-string)\b/.test(commandText)) return '搜索代码'
+      if (/\b(cat|type|more|head|tail|sed)\b/.test(commandText) || commandText.includes('get-content')) return '查看文件'
+      if (commandText.includes('git diff') || commandText.includes('git status')) return '查看修改'
+      if (commandText.startsWith('git ')) return 'Git 操作'
+      return '其他操作'
+    }
+    ,notifyError (error) {
+      if (error && error.response && error.response.status === 401) return
+      const message = error && error.response && error.response.data ? error.response.data.message : (error.message || '请求失败')
+      this.$message.error(message)
     }
   }
 }
