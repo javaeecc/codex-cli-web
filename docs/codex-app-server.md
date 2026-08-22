@@ -18,7 +18,7 @@ codex.cmd app-server generate-json-schema --experimental --out .tmp/app-server-s
 ## 使用的方法
 
 - `initialize`：声明 `codex-web` 客户端能力。
-- `thread/start`：使用选中的工作空间目录创建 Codex 线程，模型、审批策略和沙箱策略由工作台设置传入，默认模型跟随 Codex 配置，默认权限是 `on-request` + `workspaceWrite`。
+- `thread/start`：使用选中的工作空间目录创建 Codex 线程，模型、审批策略和沙箱策略由工作台设置传入，默认模型跟随 Codex 配置，默认权限是 `on-request` + `workspace-write`。当前 CLI 版本通过 `sandbox` 字符串字段接收 `workspace-write` 或 `danger-full-access`。
 - `thread/resume`：按已保存的 `threadId` 从 Codex 磁盘记录恢复线程上下文，用于 app-server 重启后的会话继续执行。
 - `turn/start`：向线程发送文本任务，推理级别通过 `effort` 传入，可选 `low`、`medium`、`high`、`xhigh`，留空时跟随 Codex 配置。
 - `turn/steer`：向当前正在运行的 turn 注入用户引导，支持思考过程中追加消息；普通发送会进入会话队列，当前 turn 结束后按顺序执行。
@@ -57,7 +57,7 @@ Reasoning 和隐藏思维链事件不会进入 JSONL，也不会发送到浏览�
 
 ## 审批
 
-工作台界面提供三种与 Codex 桌面版一致的工作权限：`请求批准`（`on-request`）、`帮我批准`（`on-failure`）和 `完全访问`（`never`）。前两者使用 `workspaceWrite` 沙箱；`never` 同时使用 `dangerFullAccess`，表示不请求审批并允许执行工作空间外的命令。底层仍兼容 `untrusted` 策略，但不在工作台界面展示。审批策略和沙箱策略都是线程创建参数，因此保存后对新建会话生效，已有会话需要新建会话才能使用新策略。
+工作台界面提供三种与 Codex 桌面版一致的工作权限：`请求批准`（`on-request`）、`帮我批准`（`on-failure`）和 `完全访问`（`never`）。前两者使用 `workspace-write` 沙箱；`never` 使用 `danger-full-access`，表示不请求审批并允许执行工作空间外的命令。底层仍兼容 `untrusted` 策略，但不在工作台界面展示。审批策略和沙箱策略都是线程创建参数，因此保存后对新建会话生效，已有会话需要新建会话才能使用新策略。
 
 命令审批使用新版 app-server 响应格式：
 

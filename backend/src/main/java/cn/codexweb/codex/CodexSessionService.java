@@ -49,7 +49,8 @@ public class CodexSessionService implements CodexProtocolClient.Listener {
     private final Map<String, Long> turnRequestsSent = new ConcurrentHashMap<String, Long>();
     private final Map<String, Long> threadRecoveryAttempts = new ConcurrentHashMap<String, Long>();
     private final Map<String, QueuedTurn> activeQueuedTurns = new ConcurrentHashMap<String, QueuedTurn>();
-    private final Map<String, PendingApproval> pendingApprovals = new ConcurrentHashMap<String, PendingApproval>();
+    // A turn can request several approvals concurrently. Keep each request until it is answered.
+    private final Map<String, Map<Long, PendingApproval>> pendingApprovals = new ConcurrentHashMap<String, Map<Long, PendingApproval>>();
     private final Map<String, Long> turnGenerations = new ConcurrentHashMap<String, Long>();
     private final Map<String, Long> lastProgress = new ConcurrentHashMap<String, Long>();
     private final Map<String, HistoryCacheEntry> historyCache = new ConcurrentHashMap<String, HistoryCacheEntry>();
@@ -112,7 +113,7 @@ public class CodexSessionService implements CodexProtocolClient.Listener {
             session.steeringAvailable = false;
             session.cancelRequested = false;
             session.cancelledTurnId = null;
-            pendingApprovals.remove(session.id);
+            clearPendingApprovals(session.id);
             sessions.save(session);
             append(session, "error", map("message", "Codex runtime 已重启，上一回合已中断"));
             if (hasQueuedTurns(session)) scheduleNextQueuedTurn(session);
@@ -351,6 +352,7 @@ public class CodexSessionService implements CodexProtocolClient.Listener {
         boolean needsThread = session.codexThreadId == null;
         long generation = session.turnGeneration + 1;
         session.turnGeneration = generation;
+        clearPendingApprovals(session.id);
         session.cancelRequested = false;
         session.cancelledTurnId = null;
         session.currentTurnId = null;
@@ -559,7 +561,7 @@ public class CodexSessionService implements CodexProtocolClient.Listener {
         final long cancellationGeneration = session.turnGeneration;
         session.cancelRequested = true;
         session.cancelledTurnId = cancelledTurnId;
-        pendingApprovals.remove(session.id);
+        clearPendingApprovals(session.id);
         pendingThreadStarts.remove(session.id);
         pendingTurns.remove(session.id);
         CodexProtocolClient client = processManager.client();
@@ -707,8 +709,9 @@ public class CodexSessionService implements CodexProtocolClient.Listener {
         if (!"accept".equals(normalizedDecision) && !"decline".equals(normalizedDecision) && !"acceptForSession".equals(normalizedDecision)) {
             throw new ApiException(HttpStatus.BAD_REQUEST, "INVALID_APPROVAL_DECISION", "审批决定不合法");
         }
-        PendingApproval pending = pendingApprovals.get(sessionId);
-        if (pending == null || !requestId.equals(pending.requestId) || pending.generation != session.turnGeneration
+        Map<Long, PendingApproval> approvals = pendingApprovals.get(sessionId);
+        PendingApproval pending = approvals == null ? null : approvals.get(requestId);
+        if (pending == null || pending.generation != session.turnGeneration
                 || !java.util.Objects.equals(pending.threadId, session.codexThreadId)
                 || (pending.turnId != null && !java.util.Objects.equals(pending.turnId, session.currentTurnId))) {
             throw new ApiException(HttpStatus.CONFLICT, "APPROVAL_NOT_PENDING", "审批请求已过期或不属于当前回合");
@@ -718,8 +721,9 @@ public class CodexSessionService implements CodexProtocolClient.Listener {
         Map<String, Object> result = new LinkedHashMap<String, Object>();
         result.put("decision", normalizedDecision);
         client.respond(requestId, result);
-        pendingApprovals.remove(sessionId, pending);
-        session.status = "RUNNING";
+        approvals.remove(requestId, pending);
+        if (approvals.isEmpty()) pendingApprovals.remove(sessionId, approvals);
+        session.status = hasPendingApprovals(sessionId) ? "WAITING_APPROVAL" : "RUNNING";
         sessions.save(session);
         result.put("requestId", requestId);
         append(session, "approval.responded", result);
@@ -818,14 +822,15 @@ public class CodexSessionService implements CodexProtocolClient.Listener {
                 log.warn("审批事件缺少 requestId: sessionId={}, threadId={}, turnId={}", session.id, session.codexThreadId, eventTurnId);
                 return;
             }
-            pendingApprovals.put(session.id, new PendingApproval(requestId, session.codexThreadId,
-                    eventTurnId == null ? session.currentTurnId : eventTurnId, session.turnGeneration));
+            pendingApprovals.computeIfAbsent(session.id, ignored -> new ConcurrentHashMap<Long, PendingApproval>())
+                    .put(requestId, new PendingApproval(requestId, session.codexThreadId,
+                            eventTurnId == null ? session.currentTurnId : eventTurnId, session.turnGeneration));
             updateStatus(session, "WAITING_APPROVAL");
         }
         if (normalized.equals("turn.completed")) {
             session.currentTurnId = null;
             session.steeringAvailable = false;
-            pendingApprovals.remove(session.id);
+            clearPendingApprovals(session.id);
             updateStatus(session, "COMPLETED");
             data.put("queuedTurnCount", session.queuedTurns == null ? 0 : session.queuedTurns.size());
             lastProgress.remove(session.id);
@@ -836,7 +841,7 @@ public class CodexSessionService implements CodexProtocolClient.Listener {
         if (normalized.equals("error")) {
             session.currentTurnId = null;
             session.steeringAvailable = false;
-            pendingApprovals.remove(session.id);
+            clearPendingApprovals(session.id);
             updateStatus(session, "FAILED");
             data.put("queuedTurnCount", session.queuedTurns == null ? 0 : session.queuedTurns.size());
             lastProgress.remove(session.id);
@@ -856,7 +861,7 @@ public class CodexSessionService implements CodexProtocolClient.Listener {
         for (Session session : sessions.all()) if ("RUNNING".equals(session.status) || "WAITING_APPROVAL".equals(session.status)) {
             if (session.codexThreadId != null) threadSessions.remove(session.codexThreadId, session.id);
             session.status = "FAILED"; session.codexThreadId = null; session.currentTurnId = null; session.steeringAvailable = false; session.cancelRequested = false; session.cancelledTurnId = null;
-            pendingApprovals.remove(session.id);
+            clearPendingApprovals(session.id);
             pendingThreadStarts.remove(session.id); pendingTurns.remove(session.id); lastProgress.remove(session.id); turnRequestsSent.remove(session.id);
             activeQueuedTurns.remove(session.id);
             sessions.save(session); append(session, "error", map("message", reason));
@@ -933,6 +938,13 @@ public class CodexSessionService implements CodexProtocolClient.Listener {
     private void updateStatus(Session session, String status) {
         if (!status.equals(session.status)) log.info("会话状态变化: sessionId={}, threadId={}, turnId={}, from={}, to={}", session.id, session.codexThreadId, session.currentTurnId, session.status, status);
         session.status = status; sessions.save(session);
+    }
+    private void clearPendingApprovals(String sessionId) {
+        if (sessionId != null) pendingApprovals.remove(sessionId);
+    }
+    private boolean hasPendingApprovals(String sessionId) {
+        Map<Long, PendingApproval> approvals = pendingApprovals.get(sessionId);
+        return approvals != null && !approvals.isEmpty();
     }
     private boolean hasQueuedTurns(Session session) { return session != null && session.queuedTurns != null && !session.queuedTurns.isEmpty(); }
     private void rememberTurnGeneration(String turnId, long generation) {

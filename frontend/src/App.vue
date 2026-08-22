@@ -8,7 +8,7 @@
       <ConversationPanel ref="conversationPanel" :project="currentProject" :current-session="currentSession" :messages="messages" :display-messages="displayMessages" :running="running" :live-status="liveStatus" :error-message="errorMessage" :can-steer="canSteer" :sending="sending" :deleting-queue-id="deletingQueueId" :draft="draft" :attachments="attachments" :socket-open="socketOpen" :composer-focused="composerFocused" :history-has-more="historyHasMore" :history-loading="historyLoading" :overall-open="overallOpen" :is-overall-group-active="isOverallGroupActive" :overall-group-status="overallGroupStatus" :thinking-status="thinkingStatus" :is-tool-group-active="isToolGroupActive" :tool-group-status="toolGroupStatus" :activity-status="activityStatus" :render-markdown="renderMarkdown" :format-time="formatTime" @open-workspace="openWorkspacePicker" @message-scroll="handleMessageScroll" @load-older="loadOlderHistory" @overall-toggle="setOverallOpen" @thinking-toggle="setThinkingOpen" @retry="retryLast" @steer="steerQueued" @delete-queued="deleteQueued" @update:draft="draft = $event" @composer-focus="composerFocused = $event" @composer-keydown="handleComposerKeydown" @upload="uploadFiles" @cancel="cancelTurn" @send="sendMessage"></ConversationPanel>
       <InspectorPanel :project="currentProject" :tabs="tabs" :active-tab="activeTab" :git-files="gitFiles" :file-items="fileItems" :file-loading-paths="fileLoadingPaths" :format-file-size="formatFileSize" @update:active-tab="activeTab = $event" @refresh-git="refreshGit" @open-diff="openDiff" @load-files="loadFiles" @toggle-directory="toggleDirectory" @open-file="openFile" @file-unavailable="notifyFileUnavailable"></InspectorPanel>
     </div>
-    <WorkspaceDialogs :workspace-visible="workspaceDialog" :workspace-roots="workspaceRoots" :workspace-items="workspaceItems" :workspace-path="workspacePath" :workspace-parent="workspaceParent" :selected-workspace="selectedWorkspace" :settings-visible="settingsDialog" :settings="settings" :settings-saving="settingsSaving" :approval-visible="approvalDialog" :approval-command="approvalCommand" :diff-visible="diffDialog" :diff-loading="diffLoading" :diff-lines="diffLines" :selected-file="selectedFile" :file-visible="fileDialog" :file-preview-loading="filePreviewLoading" :file-content="fileContent" @browse="browse" @create-folder="createFolder" @select-workspace="selectedWorkspace = $event" @close-workspace="workspaceDialog = false" @confirm-workspace="confirmWorkspace" @close-settings="settingsDialog = false" @logout="logout" @save-settings="saveSettings" @respond-approval="respondApproval" @close-diff="diffDialog = false" @expand-diff="expandDiffSection" @close-file="fileDialog = false"></WorkspaceDialogs>
+    <WorkspaceDialogs :workspace-visible="workspaceDialog" :workspace-roots="workspaceRoots" :workspace-items="workspaceItems" :workspace-path="workspacePath" :workspace-parent="workspaceParent" :selected-workspace="selectedWorkspace" :settings-visible="settingsDialog" :settings="settings" :settings-saving="settingsSaving" :approval-visible="approvalDialog" :approval-requests="approvalRequests" :diff-visible="diffDialog" :diff-loading="diffLoading" :diff-lines="diffLines" :selected-file="selectedFile" :file-visible="fileDialog" :file-preview-loading="filePreviewLoading" :file-content="fileContent" @browse="browse" @create-folder="createFolder" @select-workspace="selectedWorkspace = $event" @close-workspace="workspaceDialog = false" @confirm-workspace="confirmWorkspace" @close-settings="settingsDialog = false" @logout="logout" @save-settings="saveSettings" @respond-approval="respondApproval" @close-diff="diffDialog = false" @expand-diff="expandDiffSection" @close-file="fileDialog = false"></WorkspaceDialogs>
   </div>
 </template>
 
@@ -25,7 +25,7 @@ import WorkspaceDialogs from './components/WorkspaceDialogs.vue'
 
 export default {
   components: { LoginPage, AppTopbar, ProjectSidebar, ConversationPanel, InspectorPanel, WorkspaceDialogs },
-  data () { return { authReady: false, authenticated: false, loginForm: { username: '', password: '' }, loginLoading: false, loginError: '', authSyncInFlight: false, authExpiredHandled: false, authExpiredCleanup: null, projects: [], sessions: [], currentProject: null, currentSession: null, runtime: { running: false }, runtimeTimer: null, displayNow: Date.now(), displayClockTimer: null, settings: { approvalPolicy: 'on-request', model: '', reasoningEffort: '' }, settingsDialog: false, settingsSaving: false, diffDialog: false, diffLoading: false, fileDialog: false, filePreviewLoading: false, socket: null, socketOpen: false, socketRetryTimer: null, socketHealthTimer: null, lastSocketActivityAt: 0, leftCollapsed: false, rightCollapsed: true, activeTab: 'changes', tabs: [{ id: 'changes', label: 'Changes' }, { id: 'files', label: 'Files' }], messages: [], historyEvents: [], historyHasMore: false, historyBefore: 0, historyLoading: false, itemPhases: {}, activities: [], liveStatus: '', draft: '', lastDraft: '', sending: false, deletingQueueId: null, running: false, activeTurnText: '', errorMessage: '', gitFiles: [], currentBranch: '', branches: [], diffText: '', diffExpandedSections: {}, selectedFile: null, fileContent: null, fileItems: [], fileChildrenCache: {}, fileLoadingPaths: {}, fileTreeGeneration: 0, expandedPaths: {}, workspaceDialog: false, workspaceRoots: [], workspaceItems: [], workspacePath: '', workspaceParent: '', selectedWorkspace: '', approvalDialog: false, approvalRequestId: null, approvalCommand: '', composerFocused: false, showArchived: false, sessionSearch: '', attachments: [], statusTimer: null, statusSyncInFlight: false, sessionLoadController: null, sessionLoadGeneration: 0, markdownCache: null, lastEventId: '', seenEventIds: {}, overallOpenState: {}, followOutput: true, liveEventQueue: [], liveEventFlushTimer: null } },
+  data () { return { authReady: false, authenticated: false, loginForm: { username: '', password: '' }, loginLoading: false, loginError: '', authSyncInFlight: false, authExpiredHandled: false, authExpiredCleanup: null, projects: [], sessions: [], currentProject: null, currentSession: null, runtime: { running: false }, runtimeTimer: null, displayNow: Date.now(), displayClockTimer: null, settings: { approvalPolicy: 'on-request', model: '', reasoningEffort: '' }, settingsDialog: false, settingsSaving: false, diffDialog: false, diffLoading: false, fileDialog: false, filePreviewLoading: false, socket: null, socketOpen: false, socketRetryTimer: null, socketHealthTimer: null, lastSocketActivityAt: 0, leftCollapsed: false, rightCollapsed: true, activeTab: 'changes', tabs: [{ id: 'changes', label: 'Changes' }, { id: 'files', label: 'Files' }], messages: [], historyEvents: [], historyHasMore: false, historyBefore: 0, historyLoading: false, itemPhases: {}, activities: [], liveStatus: '', draft: '', lastDraft: '', sending: false, deletingQueueId: null, running: false, activeTurnText: '', errorMessage: '', gitFiles: [], currentBranch: '', branches: [], diffText: '', diffExpandedSections: {}, selectedFile: null, fileContent: null, fileItems: [], fileChildrenCache: {}, fileLoadingPaths: {}, fileTreeGeneration: 0, expandedPaths: {}, workspaceDialog: false, workspaceRoots: [], workspaceItems: [], workspacePath: '', workspaceParent: '', selectedWorkspace: '', approvalDialog: false, approvalRequests: [], approvalRequestId: null, approvalCommand: '', composerFocused: false, showArchived: false, sessionSearch: '', attachments: [], statusTimer: null, statusSyncInFlight: false, sessionLoadController: null, sessionLoadGeneration: 0, markdownCache: null, lastEventId: '', seenEventIds: {}, overallOpenState: {}, followOutput: true, liveEventQueue: [], liveEventFlushTimer: null } },
   computed: {
     visibleSessions () {
       const query = this.sessionSearch.trim().toLowerCase()
@@ -304,7 +304,7 @@ export default {
       this.activities = []
       this.itemPhases = {}
       this.seenEventIds = {}
-      this.approvalDialog = false
+      this.clearApprovalState()
       this.historyEvents.forEach(event => this.applyEvent(event, true))
     },
     async loadOlderHistory () {
@@ -711,8 +711,18 @@ export default {
       box.scrollTo({ top: box.scrollHeight, behavior: 'auto' })
     },
     scrollToBottomAfterRender () { this.$nextTick(() => { this.scrollToBottom(); requestAnimationFrame(() => { this.scrollToBottom(); requestAnimationFrame(() => this.scrollToBottom()); setTimeout(() => this.scrollToBottom(), 100) }) }) },
-    clearApprovalState () { this.approvalDialog = false; this.approvalRequestId = null; this.approvalCommand = '' },
-    async respondApproval (decision) { try { await api.respondApproval(this.currentSession.id, { requestId: this.approvalRequestId, decision }) } catch (e) { this.notifyError(e) } finally { this.clearApprovalState() } },
+    clearApprovalState () { this.approvalDialog = false; this.approvalRequests = []; this.approvalRequestId = null; this.approvalCommand = '' },
+    removeApprovalRequest (requestId) { this.approvalRequests = this.approvalRequests.filter(item => String(item.requestId) !== String(requestId)); this.approvalDialog = this.approvalRequests.length > 0 },
+    async respondApproval (payload) {
+      const requestId = payload && payload.requestId !== undefined ? payload.requestId : this.approvalRequestId
+      const decision = payload && payload.decision ? payload.decision : payload
+      if (requestId === null || requestId === undefined) return
+      try {
+        await api.respondApproval(this.currentSession.id, { requestId, decision })
+        this.removeApprovalRequest(requestId)
+        if (this.currentSession && this.approvalRequests.length === 0 && this.currentSession.status === 'WAITING_APPROVAL') this.$set(this.currentSession, 'status', 'RUNNING')
+      } catch (e) { this.notifyError(e) }
+    },
     overallOpen (group) { return this.isOverallGroupActive(group) || this.overallOpenState[group.id] === true },
     setOverallOpen (group, event) { if (!this.isOverallGroupActive(group)) this.$set(this.overallOpenState, group.id, event.target.open) },
     setThinkingOpen (group, event) { const open = event.target.open; (group.sourceIds || []).forEach(id => { const message = this.messages.find(item => item.id === id); if (message) { this.$set(message, 'thinkingOpen', open); this.$set(message, 'thinkingOpenTouched', true) } }) },
@@ -846,16 +856,18 @@ export default {
       } else if (type === 'approval.request') {
         if (this.currentSession) this.$set(this.currentSession, 'status', 'WAITING_APPROVAL')
         const payload = data.payload || {}
-        this.approvalRequestId = data.requestId !== undefined && data.requestId !== null
-          ? data.requestId
-          : (payload.requestId !== undefined && payload.requestId !== null ? payload.requestId : null)
-        this.approvalCommand = Array.isArray(payload.command) ? payload.command.join(' ') : (payload.command || payload.reason || '需要你的确认')
-        this.approvalDialog = true
+        const requestId = data.requestId !== undefined && data.requestId !== null ? data.requestId : payload.requestId
+        if (requestId !== undefined && requestId !== null && !this.approvalRequests.some(item => String(item.requestId) === String(requestId))) {
+          const command = Array.isArray(payload.command) ? payload.command.join(' ') : (payload.command || payload.reason || '需要你的确认')
+          this.approvalRequests.push({ requestId, command })
+        }
+        this.approvalDialog = this.approvalRequests.length > 0
         this.running = true
         this.liveStatus = '等待审批'
       } else if (type === 'approval.responded') {
-        this.clearApprovalState()
-        if (this.currentSession && this.currentSession.status === 'WAITING_APPROVAL') this.$set(this.currentSession, 'status', 'RUNNING')
+        const requestId = data.requestId !== undefined && data.requestId !== null ? data.requestId : (data.payload && data.payload.requestId)
+        if (requestId !== undefined && requestId !== null) this.removeApprovalRequest(requestId)
+        if (this.currentSession && this.approvalRequests.length === 0 && this.currentSession.status === 'WAITING_APPROVAL') this.$set(this.currentSession, 'status', 'RUNNING')
       } else if (type === 'diff.updated') {
         const payload = data.payload || {}
         this.diffText = payload.diff || data.text || this.diffText

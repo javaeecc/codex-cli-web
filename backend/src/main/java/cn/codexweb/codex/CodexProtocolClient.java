@@ -129,16 +129,10 @@ public class CodexProtocolClient {
         params.put("cwd", cwd);
         params.put("approvalPolicy", approvalPolicy);
         if (model != null && !model.trim().isEmpty()) params.put("model", model.trim());
-        Map<String, Object> sandboxPolicy = new HashMap<String, Object>();
-        if ("never".equals(approvalPolicy)) {
-            sandboxPolicy.put("type", "dangerFullAccess");
-            params.put("privilegedEscalationApproved", true);
-        } else {
-            sandboxPolicy.put("type", "workspaceWrite");
-            sandboxPolicy.put("writableRoots", java.util.Collections.singletonList(cwd));
-            sandboxPolicy.put("networkAccess", false);
-        }
-        params.put("sandboxPolicy", sandboxPolicy);
+        // Codex 0.147.0 expects the legacy thread/start field `sandbox`.
+        // Sending the newer `sandboxPolicy` object is silently ignored, which
+        // causes a configured full-access thread to fall back to workspace-write.
+        params.put("sandbox", "never".equals(approvalPolicy) ? "danger-full-access" : "workspace-write");
         return params;
     }
 
