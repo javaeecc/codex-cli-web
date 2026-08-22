@@ -5,7 +5,7 @@
     <div v-if="!rightCollapsed" class="mobile-inspector-backdrop" @click="rightCollapsed = true"></div>
     <div class="workspace-layout">
       <ProjectSidebar :projects="projects" :current-project="currentProject" :sessions="sessions" :visible-sessions="visibleSessions" :current-session="currentSession" :socket-open="socketOpen" :show-archived="showArchived" :session-search="sessionSearch" :compact-path="compactPath" :status-class="statusClass" :format-session-time="formatSessionTime" @open-workspace="openWorkspacePicker" @select-project="selectProject" @delete-project="deleteProject" @create-session="createSession" @update:session-search="sessionSearch = $event" @select-session="selectSession" @toggle-archive="toggleSessionArchive" @toggle-archived="showArchived = !showArchived"></ProjectSidebar>
-      <ConversationPanel ref="conversationPanel" :project="currentProject" :current-session="currentSession" :messages="messages" :display-messages="displayMessages" :running="running" :live-status="liveStatus" :error-message="errorMessage" :can-steer="canSteer" :sending="sending" :deleting-queue-id="deletingQueueId" :draft="draft" :attachments="attachments" :socket-open="socketOpen" :composer-focused="composerFocused" :history-has-more="historyHasMore" :history-loading="historyLoading" :overall-open="overallOpen" :is-overall-group-active="isOverallGroupActive" :overall-group-status="overallGroupStatus" :thinking-status="thinkingStatus" :is-tool-group-active="isToolGroupActive" :tool-group-status="toolGroupStatus" :activity-status="activityStatus" :render-markdown="renderMarkdown" :format-time="formatTime" @open-workspace="openWorkspacePicker" @message-scroll="handleMessageScroll" @load-older="loadOlderHistory" @overall-toggle="setOverallOpen" @thinking-toggle="setThinkingOpen" @retry="retryLast" @steer="steerQueued" @delete-queued="deleteQueued" @update:draft="draft = $event" @composer-focus="composerFocused = $event" @composer-keydown="handleComposerKeydown" @upload="uploadFiles" @cancel="cancelTurn" @send="sendMessage"></ConversationPanel>
+      <ConversationPanel ref="conversationPanel" :project="currentProject" :current-session="currentSession" :messages="messages" :display-messages="displayMessages" :running="running" :live-status="liveStatus" :error-message="errorMessage" :can-steer="canSteer" :sending="sending" :deleting-queue-id="deletingQueueId" :draft="draft" :attachments="attachments" :socket-open="socketOpen" :composer-focused="composerFocused" :history-has-more="historyHasMore" :history-loading="historyLoading" :overall-open="overallOpen" :is-overall-group-active="isOverallGroupActive" :overall-group-status="overallGroupStatus" :thinking-status="thinkingStatus" :is-tool-group-active="isToolGroupActive" :tool-group-status="toolGroupStatus" :activity-status="activityStatus" :render-markdown="renderMarkdown" :format-time="formatTime" @open-workspace="openWorkspacePicker" @message-scroll="handleMessageScroll" @load-older="loadOlderHistory" @overall-toggle="setOverallOpen" @thinking-toggle="setThinkingOpen" @retry="retryLast" @steer="steerQueued" @delete-queued="deleteQueued" @update:draft="draft = $event" @composer-focus="composerFocused = $event" @composer-keydown="handleComposerKeydown" @upload="uploadFiles" @remove-attachment="attachments.splice($event, 1)" @resend-message="resendMessage" @cancel="cancelTurn" @send="sendMessage"></ConversationPanel>
       <InspectorPanel :project="currentProject" :tabs="tabs" :active-tab="activeTab" :git-files="gitFiles" :file-items="fileItems" :file-loading-paths="fileLoadingPaths" :format-file-size="formatFileSize" @update:active-tab="activeTab = $event" @refresh-git="refreshGit" @open-diff="openDiff" @load-files="loadFiles" @toggle-directory="toggleDirectory" @open-file="openFile" @file-unavailable="notifyFileUnavailable"></InspectorPanel>
     </div>
     <WorkspaceDialogs :workspace-visible="workspaceDialog" :workspace-roots="workspaceRoots" :workspace-items="workspaceItems" :workspace-path="workspacePath" :workspace-parent="workspaceParent" :selected-workspace="selectedWorkspace" :settings-visible="settingsDialog" :settings="settings" :settings-saving="settingsSaving" :approval-visible="approvalDialog" :approval-requests="approvalRequests" :diff-visible="diffDialog" :diff-loading="diffLoading" :diff-lines="diffLines" :selected-file="selectedFile" :file-visible="fileDialog" :file-preview-loading="filePreviewLoading" :file-content="fileContent" @browse="browse" @create-folder="createFolder" @select-workspace="selectedWorkspace = $event" @close-workspace="workspaceDialog = false" @confirm-workspace="confirmWorkspace" @close-settings="settingsDialog = false" @logout="logout" @save-settings="saveSettings" @respond-approval="respondApproval" @close-diff="diffDialog = false" @expand-diff="expandDiffSection" @close-file="fileDialog = false"></WorkspaceDialogs>
@@ -356,6 +356,7 @@ export default {
       }
     },
     async sendMessage () { return this.submitMessage() },
+    resendMessage (text) { if (!text || this.sending) return; this.draft = text; this.$nextTick(() => this.sendMessage()) },
     async submitMessage () {
       if (!this.currentSession || !this.draft.trim() || this.sending) return
       const wasRunning = this.running
@@ -450,10 +451,11 @@ export default {
     startStatusPolling (sessionId) {
       this.stopStatusPolling()
       this.statusSyncInFlight = false
-      // SSE is the primary path; poll only as a reconnect/recovery fallback.
+      // SSE is the low-latency path. Polling remains enabled as a cheap
+      // terminal-state fallback when a stream appears open but an event was lost.
       this.statusTimer = setInterval(() => {
         if (this.socket && this.socket.readyState === 1) this.socketOpen = true
-        if (!this.socketOpen) this.syncSession(sessionId)
+        this.syncSession(sessionId)
       }, 5000)
     },
     async syncSession (sessionId) {
@@ -463,20 +465,26 @@ export default {
         const sessionResult = await api.session(sessionId)
         if (!this.currentSession || this.currentSession.id !== sessionId) return
         const previousPending = this.sessionHasPendingWork(this.currentSession)
+        const previousStatus = this.currentSession.status
         this.currentSession = sessionResult.data
         const index = this.sessions.findIndex(item => item.id === sessionId)
         if (index >= 0) this.$set(this.sessions, index, sessionResult.data)
         const pending = this.sessionHasPendingWork(sessionResult.data)
         this.running = pending
-        // SSE is the normal event path. Fetch history only for reconnect recovery or a terminal transition.
-        const shouldRecoverEvents = !this.socketOpen || (previousPending && !pending)
+        // Recover when the stream is down, a running turn became terminal, or
+        // the session changed while the stream still looked healthy.
+        const statusChanged = previousStatus !== sessionResult.data.status
+        const shouldRecoverEvents = !this.socketOpen || (previousPending && !pending) || statusChanged
         const recoveryDue = Date.now() - this.lastEventRecoveryAt > 10000
         if (shouldRecoverEvents && recoveryDue) {
           this.lastEventRecoveryAt = Date.now()
           const eventsResult = await api.events(sessionId, this.lastEventId)
           if (this.currentSession && this.currentSession.id === sessionId) eventsResult.data.forEach(event => this.applyEvent(event, false))
         }
-        if (!pending) this.stopStatusPolling()
+        if (!pending) {
+          this.liveStatus = ''
+          this.stopStatusPolling()
+        }
       } catch (e) {
         if (window.console) console.warn('[codex-web] 会话状态同步失败', sessionId, e)
       } finally {
@@ -530,7 +538,7 @@ export default {
       }
       ;(async () => {
         try {
-          const response = await fetch(api.streamUrl(sessionId), { credentials: 'include', headers: { Accept: 'text/event-stream', 'Cache-Control': 'no-cache', ...api.streamHeaders() }, signal: controller.signal })
+          const response = await fetch(api.streamUrl(sessionId), { headers: { Accept: 'text/event-stream', 'Cache-Control': 'no-cache', ...api.streamHeaders() }, signal: controller.signal })
           if (this.socket !== source) return
            if (response.status === 401) { api.notifyAuthExpired(); return }
            if (!response.ok) throw new Error(`SSE HTTP ${response.status}`)
@@ -652,7 +660,7 @@ export default {
     async browse (path) { try { const result = await api.browse(path); this.workspacePath = path; this.workspaceItems = result.data; const normalized = path.replace(/\\/g, '/').replace(/\/+$/, ''); this.workspaceParent = /^[A-Za-z]:$/.test(normalized) || normalized === '' ? '' : normalized.slice(0, normalized.lastIndexOf('/')) || '/' ; this.selectedWorkspace = path } catch (e) { this.notifyError(e) } },
     async confirmWorkspace () { try { const result = await api.createProject({ path: this.selectedWorkspace }); this.projects = this.projects.filter(p => p.id !== result.data.id); this.projects.unshift(result.data); this.workspaceDialog = false; await this.selectProject(result.data) } catch (e) { this.notifyError(e) } },
     async createFolder () { const name = await this.ask('新建目录', 'new-project'); if (!name) return; try { const result = await api.createFolder({ parent: this.workspacePath, name }); await this.browse(this.workspacePath); this.selectedWorkspace = result.data.path } catch (e) { this.notifyError(e) } },
-    async uploadFiles (event) { const files = Array.from(event.target.files || []); for (const file of files) { try { const result = await api.upload(this.currentSession.id, file); this.attachments.push(result.data) } catch (e) { this.notifyError(e) } } event.target.value = '' },
+    async uploadFiles (event) { const files = Array.from(event.target.files || []); for (const file of files) { const uploadId = `upload-${Date.now()}-${Math.random()}`; this.attachments.push({ name: file.name, size: file.size, status: 'uploading', uploadId }); try { const result = await api.upload(this.currentSession.id, file); const index = this.attachments.findIndex(item => item.uploadId === uploadId); if (index >= 0) this.$set(this.attachments, index, { ...result.data, status: 'uploaded' }); this.$message({ type: 'success', message: `附件已上传：${result.data.name}`, duration: 3500, showClose: true }) } catch (e) { const index = this.attachments.findIndex(item => item.uploadId === uploadId); if (index >= 0) this.$set(this.attachments[index], 'status', 'failed'); this.notifyError(e) } } event.target.value = '' },
     async editProject (project) { const name = await this.ask('项目名称', project.name); if (name) { const result = await api.updateProject(project.id, { name }); this.projects = this.projects.map(item => item.id === project.id ? result.data : item); if (this.currentProject && this.currentProject.id === project.id) this.currentProject = result.data } },
     async deleteProject (project) {
       try {

@@ -1,7 +1,7 @@
 package cn.codexweb.api;
 
 import cn.codexweb.config.CodexWebProperties;
-import cn.codexweb.web.AuthInterceptor;
+import cn.codexweb.web.JwtTokenService;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -10,7 +10,6 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 import javax.servlet.http.HttpServletRequest;
-import javax.servlet.http.HttpSession;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.util.LinkedHashMap;
@@ -23,6 +22,7 @@ public class AuthController {
     private static final int MAX_LOGIN_FAILURES = 5;
     private static final long LOGIN_WINDOW_MILLIS = 60_000L;
     private final CodexWebProperties properties;
+    private final JwtTokenService tokens;
     private final ConcurrentHashMap<String, LoginWindow> loginWindows = new ConcurrentHashMap<String, LoginWindow>();
 
     private static final class LoginWindow {
@@ -30,13 +30,16 @@ public class AuthController {
         private long windowStartedAt;
     }
 
-    public AuthController(CodexWebProperties properties) { this.properties = properties; }
+    public AuthController(CodexWebProperties properties, JwtTokenService tokens) {
+        this.properties = properties;
+        this.tokens = tokens;
+    }
 
     @GetMapping("/me")
     public Map<String, Object> me(HttpServletRequest request) {
-        HttpSession session = request.getSession(false);
-        if (!authenticated(session)) throw new ApiException(HttpStatus.UNAUTHORIZED, "AUTH_REQUIRED", "需要登录");
-        return userResponse(session);
+        String username = tokens.username(tokens.tokenFrom(request.getHeader("Authorization")));
+        if (username == null) throw new ApiException(HttpStatus.UNAUTHORIZED, "AUTH_REQUIRED", "Login required");
+        return userResponse(username, null);
     }
 
     @PostMapping("/login")
@@ -46,33 +49,24 @@ public class AuthController {
         String remote = request.getRemoteAddr() == null ? "unknown" : request.getRemoteAddr();
         if (isRateLimited(remote) || !constantTimeEquals(properties.getLoginUsername(), username) || !constantTimeEquals(properties.getLoginPassword(), password)) {
             recordFailure(remote);
-            throw new ApiException(HttpStatus.UNAUTHORIZED, "INVALID_CREDENTIALS", "用户名或密码错误");
+            throw new ApiException(HttpStatus.UNAUTHORIZED, "INVALID_CREDENTIALS", "Invalid username or password");
         }
         loginWindows.remove(remote);
-        HttpSession session = request.getSession(true);
-        request.changeSessionId();
-        session.setAttribute(AuthInterceptor.SESSION_AUTHENTICATED, true);
-        session.setAttribute("CODEX_WEB_USERNAME", username);
-        return userResponse(session);
+        return userResponse(username, tokens.create(username));
     }
 
     @PostMapping("/logout")
-    public Map<String, Object> logout(HttpServletRequest request) {
-        HttpSession session = request.getSession(false);
-        if (session != null) session.invalidate();
+    public Map<String, Object> logout() {
         Map<String, Object> result = new LinkedHashMap<String, Object>();
         result.put("authenticated", false);
         return result;
     }
 
-    private boolean authenticated(HttpSession session) {
-        return session != null && Boolean.TRUE.equals(session.getAttribute(AuthInterceptor.SESSION_AUTHENTICATED));
-    }
-
-    private Map<String, Object> userResponse(HttpSession session) {
+    private Map<String, Object> userResponse(String username, String token) {
         Map<String, Object> result = new LinkedHashMap<String, Object>();
         result.put("authenticated", true);
-        result.put("username", session.getAttribute("CODEX_WEB_USERNAME"));
+        result.put("username", username);
+        if (token != null) result.put("token", token);
         return result;
     }
 

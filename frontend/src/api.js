@@ -1,28 +1,40 @@
 import axios from 'axios'
 
-const client = axios.create({ baseURL: '/api', timeout: 30000, withCredentials: true })
-const urlToken = new URLSearchParams(location.search).get('token')
-if (urlToken) client.defaults.headers.common['X-Codex-Token'] = urlToken
-if (urlToken) {
-  const url = new URL(location.href)
-  url.searchParams.delete('token')
-  window.history.replaceState({}, document.title, `${url.pathname}${url.search}${url.hash}`)
-}
+const client = axios.create({ baseURL: '/api', timeout: 30000 })
 const AUTH_EXPIRED_EVENT = 'codex-web-auth-expired'
+const JWT_STORAGE_KEY = 'codex-web-jwt'
+let jwt = null
+
+function setJwt (value) {
+  jwt = value || null
+  if (jwt) {
+    client.defaults.headers.common.Authorization = `Bearer ${jwt}`
+    try { localStorage.setItem(JWT_STORAGE_KEY, jwt) } catch (e) {}
+  } else {
+    delete client.defaults.headers.common.Authorization
+    try { localStorage.removeItem(JWT_STORAGE_KEY) } catch (e) {}
+  }
+}
+
+try { setJwt(localStorage.getItem(JWT_STORAGE_KEY)) } catch (e) {}
 
 client.interceptors.response.use(response => response, error => {
   const status = error && error.response && error.response.status
   const url = error && error.config && error.config.url ? error.config.url : ''
-  if (status === 401 && !url.includes('/auth/login') && !url.includes('/auth/logout') && !url.includes('/health')) window.dispatchEvent(new Event(AUTH_EXPIRED_EVENT))
+  if (status === 401 && !url.includes('/auth/login') && !url.includes('/auth/logout') && !url.includes('/health')) {
+    setJwt(null)
+    window.dispatchEvent(new Event(AUTH_EXPIRED_EVENT))
+  }
   return Promise.reject(error)
 })
 
 export default {
   onAuthExpired: handler => { window.addEventListener(AUTH_EXPIRED_EVENT, handler); return () => window.removeEventListener(AUTH_EXPIRED_EVENT, handler) },
-  notifyAuthExpired: () => window.dispatchEvent(new Event(AUTH_EXPIRED_EVENT)),
+  notifyAuthExpired: () => { setJwt(null); window.dispatchEvent(new Event(AUTH_EXPIRED_EVENT)) },
   authMe: () => client.get('/auth/me'),
-  login: payload => client.post('/auth/login', payload),
-  logout: () => client.post('/auth/logout'),
+  login: payload => client.post('/auth/login', payload).then(response => { setJwt(response.data && response.data.token); return response }),
+  logout: () => client.post('/auth/logout').finally(() => setJwt(null)),
+  clearJwt: () => setJwt(null),
   health: () => client.get('/health'),
   runtime: () => client.get('/runtime'),
   startRuntime: () => client.post('/runtime/start'),
@@ -40,7 +52,7 @@ export default {
   events: (id, afterEventId) => client.get(`/sessions/${id}/events`, { params: afterEventId ? { after: afterEventId } : {} }),
   history: (id, config) => client.get(`/sessions/${id}/history`, config),
   streamUrl: id => `/api/sessions/${encodeURIComponent(id)}/stream`,
-  streamHeaders: () => urlToken ? { 'X-Codex-Token': urlToken } : {},
+  streamHeaders: () => jwt ? { Authorization: `Bearer ${jwt}` } : {},
   startTurn: (id, payload) => client.post(`/sessions/${id}/turns`, payload),
   steerTurn: (id, payload) => client.post(`/sessions/${id}/steer`, payload),
   steerQueued: (id, queueId) => client.post(`/sessions/${id}/queue/${queueId}/steer`),
@@ -60,6 +72,11 @@ export default {
   checkout: (id, branch) => client.post(`/projects/${id}/git/checkout`, { branch }),
   diff: (id, file) => client.get(`/projects/${id}/git/diff`, { params: file ? { file } : {} }),
   files: (id, path) => client.get(`/projects/${id}/files`, { params: path ? { path } : {} }),
-  content: (id, path) => client.get(`/projects/${id}/files/content`, { params: { path } })
-  ,upload: (id, file) => { const form = new FormData(); form.append('file', file); return client.post(`/sessions/${id}/uploads`, form, { headers: { 'Content-Type': 'multipart/form-data' } }) }
+  content: (id, path) => client.get(`/projects/${id}/files/content`, { params: { path } }),
+  upload: (id, file) => {
+    const form = new FormData()
+    form.append('file', file)
+    // Let the browser add the multipart boundary required by Spring.
+    return client.post(`/sessions/${id}/uploads`, form)
+  }
 }

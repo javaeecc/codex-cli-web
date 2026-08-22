@@ -117,6 +117,8 @@ body { background: var(--bg); color: var(--text); }
 .message-block.user .message-meta { display: none; }
 .message-block.assistant .message-meta { display: none; }
 .message-block.user .user-message { align-self: flex-end; }
+.message-block.user .user-message { cursor: text; }
+.resend-action { display: flex; justify-content: flex-end; padding-top: 8px; margin-top: 8px; border-top: 1px solid rgba(152,162,179,.25); }
 .message-block.thinking { margin: 0 0 18px; max-width: 900px; }
 .message-block.overall-group { width: 100%; max-width: 900px; margin: 0 0 14px; }
 .overall-thought { width: 100%; color: var(--muted); font-size: 12px; background: transparent; overflow: hidden; }
@@ -169,6 +171,14 @@ body { background: var(--bg); color: var(--text); }
 .queued-item .el-button { flex: 0 0 auto; padding: 4px 5px; color: var(--blue); }
 .queued-item .queue-delete-button { color: var(--faint); }
 .queued-item .queue-delete-button:hover { color: var(--danger); }
+.attachment-panel { border-color: rgba(37,99,235,.28); }
+.attachment-panel .queued-panel-heading { background: #f8fbff; }
+.attachment-panel .queued-panel-heading i { color: var(--accent); }
+.attachment-item-icon { width: 18px; height: 18px; display: inline-flex; align-items: center; justify-content: center; border-radius: 4px; background: #edf4ff; color: var(--accent); }
+.attachment-item-icon i { font-size: 12px; }
+.attachment-uploaded { flex: 0 0 auto; color: #087443; font-size: 10px; }
+.attachment-item-icon.uploading { color: var(--accent); }
+.attachment-item-icon.failed, .attachment-uploaded.failed { color: var(--danger); }
 @media (max-width: 720px) {
   html, body, #app { height: 100%; min-height: 100%; overflow: hidden; }
   .topbar { height: 56px; min-height: 56px; padding: 0 10px; }

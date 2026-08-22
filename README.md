@@ -35,10 +35,10 @@ npm run serve
 $env:CODEX_COMMAND = 'C:\nvm4w\nodejs\codex.cmd'
 $env:CODEX_WEB_HOST = '127.0.0.1'
 $env:CODEX_WEB_PORT = '8080'
-$env:CODEX_WEB_TOKEN = 'change-this-token'
+$env:CODEX_WEB_JWT_SECRET = 'replace-with-a-long-random-secret'
 ```
 
-远程访问前必须配置访问令牌、监听地址和网络边界。拥有工作台访问权限的人可以操作本机 Codex 和项目文件。
+远程访问前请配置监听地址和网络边界。拥有工作台访问权限的人可以操作本机 Codex 和项目文件。
 
 ## 打包
 

@@ -980,7 +980,59 @@ public class CodexSessionService implements CodexProtocolClient.Listener {
     }
     private void append(Session session, String type, Map<String, Object> data) {
         StoredEvent event = new StoredEvent(); event.id = UUID.randomUUID().toString(); event.type = type; event.sessionId = session.id; event.timestamp = java.time.Instant.now().toString(); event.data = data;
-        sessions.appendEvent(event); Map<String, Object> message = new LinkedHashMap<String, Object>(); message.put("id", event.id); message.put("type", type); message.put("sessionId", session.id); message.put("timestamp", event.timestamp); message.put("data", data); hub.publish(session.id, message);
+        sessions.appendEvent(event);
+        Map<String, Object> message = new LinkedHashMap<String, Object>(); message.put("id", event.id); message.put("type", type); message.put("sessionId", session.id); message.put("timestamp", event.timestamp); message.put("data", realtimeData(data)); hub.publish(session.id, message);
+    }
+
+    private Map<String, Object> realtimeData(Map<String, Object> source) {
+        Map<String, Object> result = new LinkedHashMap<String, Object>();
+        copyValue(source, result, "method");
+        copyValue(source, result, "text");
+        copyValue(source, result, "itemId");
+        copyValue(source, result, "phase");
+        copyValue(source, result, "requestId");
+        copyValue(source, result, "queueId");
+        copyValue(source, result, "queuedTurnCount");
+        Map<String, Object> payload = mapValue(source, "payload");
+        if (payload == null) return result;
+        Map<String, Object> compactPayload = new LinkedHashMap<String, Object>();
+        copyValue(payload, compactPayload, "requestId");
+        copyValue(payload, compactPayload, "command");
+        copyValue(payload, compactPayload, "reason");
+        copyValue(payload, compactPayload, "message");
+        copyValue(payload, compactPayload, "willRetry");
+        copyValue(payload, compactPayload, "diff");
+        copyValue(payload, compactPayload, "itemId");
+        copyValue(payload, compactPayload, "callId");
+        copyRealtimeValue(payload, compactPayload, "output");
+        copyRealtimeValue(payload, compactPayload, "aggregatedOutput");
+        copyValue(payload, compactPayload, "exitCode");
+        copyValue(payload, compactPayload, "status");
+        Map<String, Object> item = mapValue(payload, "item");
+        if (item != null) {
+            Map<String, Object> compactItem = new LinkedHashMap<String, Object>();
+            copyValue(item, compactItem, "id");
+            copyValue(item, compactItem, "type");
+            copyValue(item, compactItem, "phase");
+            copyValue(item, compactItem, "command");
+            copyRealtimeValue(item, compactItem, "output");
+            copyRealtimeValue(item, compactItem, "aggregatedOutput");
+            copyValue(item, compactItem, "exitCode");
+            copyValue(item, compactItem, "status");
+            compactPayload.put("item", compactItem);
+        }
+        if (!compactPayload.isEmpty()) result.put("payload", compactPayload);
+        return result;
+    }
+
+    private void copyRealtimeValue(Map<String, Object> source, Map<String, Object> target, String key) {
+        if (source == null || !source.containsKey(key)) return;
+        Object value = source.get(key);
+        if (value instanceof String && ((String) value).length() > 8192) {
+            target.put(key, ((String) value).substring(0, 8192) + "\n... output truncated ...");
+        } else {
+            target.put(key, value);
+        }
     }
     private void logEvent(String normalized, Session session, String method, String turnId, Long requestId) {
         if ("turn.completed".equals(normalized) || "error".equals(normalized) || "approval.request".equals(normalized) || "turn.retrying".equals(normalized)) {

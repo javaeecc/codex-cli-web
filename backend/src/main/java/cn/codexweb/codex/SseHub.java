@@ -25,7 +25,9 @@ import java.util.concurrent.atomic.AtomicLong;
 @Component
 public class SseHub {
     private static final Logger log = LoggerFactory.getLogger(SseHub.class);
-    private static final int MAX_SUBSCRIBERS_PER_SESSION = 3;
+    // A browser tab owns the stream for a session. Keeping old streams around
+    // makes reconnects compete for the same event queue and can lose terminal events.
+    private static final int MAX_SUBSCRIBERS_PER_SESSION = 1;
     private static final int MAX_TOTAL_SUBSCRIBERS = 64;
     private static final int MAX_PENDING_MESSAGES = 256;
     private static final int MAX_EVENT_BYTES = 512 * 1024;
