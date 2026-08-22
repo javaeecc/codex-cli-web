@@ -3,6 +3,11 @@ import axios from 'axios'
 const client = axios.create({ baseURL: '/api', timeout: 30000, withCredentials: true })
 const urlToken = new URLSearchParams(location.search).get('token')
 if (urlToken) client.defaults.headers.common['X-Codex-Token'] = urlToken
+if (urlToken) {
+  const url = new URL(location.href)
+  url.searchParams.delete('token')
+  window.history.replaceState({}, document.title, `${url.pathname}${url.search}${url.hash}`)
+}
 const AUTH_EXPIRED_EVENT = 'codex-web-auth-expired'
 
 client.interceptors.response.use(response => response, error => {
@@ -34,7 +39,8 @@ export default {
   session: id => client.get(`/sessions/${id}`),
   events: (id, afterEventId) => client.get(`/sessions/${id}/events`, { params: afterEventId ? { after: afterEventId } : {} }),
   history: (id, config) => client.get(`/sessions/${id}/history`, config),
-  streamUrl: id => { const token = new URLSearchParams(location.search).get('token'); return `/api/sessions/${encodeURIComponent(id)}/stream${token ? `?token=${encodeURIComponent(token)}` : ''}` },
+  streamUrl: id => `/api/sessions/${encodeURIComponent(id)}/stream`,
+  streamHeaders: () => urlToken ? { 'X-Codex-Token': urlToken } : {},
   startTurn: (id, payload) => client.post(`/sessions/${id}/turns`, payload),
   steerTurn: (id, payload) => client.post(`/sessions/${id}/steer`, payload),
   steerQueued: (id, queueId) => client.post(`/sessions/${id}/queue/${queueId}/steer`),

@@ -1,5 +1,6 @@
 package cn.codexweb.codex;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.MediaType;
@@ -25,10 +26,14 @@ import java.util.concurrent.atomic.AtomicLong;
 public class SseHub {
     private static final Logger log = LoggerFactory.getLogger(SseHub.class);
     private static final int MAX_SUBSCRIBERS_PER_SESSION = 3;
+    private static final int MAX_TOTAL_SUBSCRIBERS = 64;
     private static final int MAX_PENDING_MESSAGES = 256;
+    private static final int MAX_EVENT_BYTES = 512 * 1024;
     private final ConcurrentMap<String, Deque<SseEmitter>> streams = new ConcurrentHashMap<String, Deque<SseEmitter>>();
     private final ConcurrentMap<SseEmitter, EmitterState> emitterStates = new ConcurrentHashMap<SseEmitter, EmitterState>();
     private final AtomicLong senderIds = new AtomicLong();
+    private final java.util.concurrent.atomic.AtomicInteger subscriberCount = new java.util.concurrent.atomic.AtomicInteger();
+    private final ObjectMapper mapper = new ObjectMapper();
 
     private static final class EmitterState {
         private final SseEmitter emitter;
@@ -52,6 +57,15 @@ public class SseHub {
             return thread;
         });
         emitterStates.put(emitter, state);
+        if (subscriberCount.incrementAndGet() > MAX_TOTAL_SUBSCRIBERS) {
+            subscriberCount.decrementAndGet();
+            emitterStates.remove(emitter);
+            state.closed = true;
+            state.sender.shutdownNow();
+            try { emitter.completeWithError(new IllegalStateException("SSE subscriber limit reached")); } catch (Exception ignored) { }
+            log.warn("SSE 全局连接数已达上限: maxSubscribers={}", MAX_TOTAL_SUBSCRIBERS);
+            return emitter;
+        }
 
         Deque<SseEmitter> sessionStreams = streams.get(sessionId);
         if (sessionStreams == null) {
@@ -115,6 +129,21 @@ public class SseHub {
     }
 
     private void enqueue(final EmitterState state, final String sessionId, final Map<String, Object> event) {
+        if (event != null) {
+            try {
+                if (mapper.writeValueAsBytes(event).length > MAX_EVENT_BYTES) {
+                    log.warn("SSE 事件过大，断开连接以保护服务: sessionId={}, maxBytes={}", sessionId, MAX_EVENT_BYTES);
+                    remove(sessionId, state.emitter);
+                    try { state.emitter.completeWithError(new IllegalStateException("SSE event too large")); } catch (Exception ignored) { }
+                    return;
+                }
+            } catch (Exception exception) {
+                log.warn("SSE 事件序列化失败，断开连接: sessionId={}", sessionId, exception);
+                remove(sessionId, state.emitter);
+                try { state.emitter.completeWithError(exception); } catch (Exception ignored) { }
+                return;
+            }
+        }
         try {
             state.sender.execute(() -> {
                 if (state.closed) return;
@@ -151,6 +180,7 @@ public class SseHub {
         if (sessionStreams.isEmpty()) streams.remove(sessionId, sessionStreams);
         EmitterState state = emitterStates.remove(emitter);
         if (state != null) {
+            subscriberCount.decrementAndGet();
             state.closed = true;
             state.sender.shutdownNow();
             if (sessionId != null) log.info("SSE 连接清理: sessionId={}, subscribers={}", sessionId, subscriberCount(sessionId));

@@ -111,6 +111,7 @@ body { background: var(--bg); color: var(--text); }
 .left-panel, .conversation, .right-panel { min-height: 0; }
 .conversation { height: 100%; min-height: 0; overflow: hidden; }
 .message-scroll { flex: 1 1 0%; min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
+.history-more { display: flex; justify-content: center; padding: 4px 0 16px; }
 .composer { flex: 0 0 auto; position: relative; z-index: 2; }
 .message-block.user { margin-left: auto; margin-right: 0; display: flex; flex-direction: column; align-items: flex-end; max-width: 78%; }
 .message-block.user .message-meta { display: none; }

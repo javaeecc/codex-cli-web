@@ -7,4 +7,7 @@ public class SessionHistory {
     public List<StoredEvent> events = new ArrayList<StoredEvent>();
     public String lastEventId;
     public int sourceEventCount;
+    public int totalDisplayEventCount;
+    public boolean hasMore;
+    public int nextBefore;
 }

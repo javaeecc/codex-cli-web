@@ -85,8 +85,7 @@ public class GitService {
     public String diff(String rawPath, String file) {
         Path path = guard.requireDirectory(rawPath);
         if (file == null || file.trim().isEmpty()) return limit(run(path, "diff", "--no-ext-diff", "--unified=999999").stdout);
-        Path target = path.resolve(file).normalize();
-        if (!target.startsWith(path)) throw new ApiException(HttpStatus.BAD_REQUEST, "INVALID_FILE_PATH", "文件路径不合法");
+        Path target = guard.requireInside(path, path.resolve(file));
         return limit(run(path, "diff", "--no-ext-diff", "--unified=999999", "--", path.relativize(target).toString()).stdout);
     }
 

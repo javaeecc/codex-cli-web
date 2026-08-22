@@ -8,6 +8,8 @@ import org.springframework.web.servlet.HandlerInterceptor;
 import javax.servlet.http.HttpServletRequest;
 import javax.servlet.http.HttpServletResponse;
 import javax.servlet.http.HttpSession;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
 
 @Component
 public class AuthInterceptor implements HandlerInterceptor {
@@ -29,10 +31,15 @@ public class AuthInterceptor implements HandlerInterceptor {
             String authorization = request.getHeader("Authorization");
             if (authorization != null && authorization.startsWith("Bearer ")) token = authorization.substring(7);
         }
-        if (token == null) token = request.getParameter("token");
-        if (properties.getAuthToken() != null && !properties.getAuthToken().trim().isEmpty() && properties.getAuthToken().equals(token)) return true;
+        if (properties.getAuthToken() != null && !properties.getAuthToken().trim().isEmpty() && constantTimeEquals(properties.getAuthToken(), token)) return true;
 
+        response.setHeader("Cache-Control", "no-store");
         response.sendError(HttpStatus.UNAUTHORIZED.value(), "需要登录后访问 Codex Web");
         return false;
+    }
+
+    private boolean constantTimeEquals(String expected, String actual) {
+        if (actual == null) return false;
+        return MessageDigest.isEqual(expected.getBytes(StandardCharsets.UTF_8), actual.getBytes(StandardCharsets.UTF_8));
     }
 }

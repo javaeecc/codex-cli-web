@@ -24,11 +24,11 @@ public class ProjectFileService {
 
     public List<Map<String, Object>> tree(String rawProject, String rawPath) {
         Path project = guard.requireDirectory(rawProject);
-        Path current = rawPath == null || rawPath.trim().isEmpty() ? project : project.resolve(rawPath).normalize();
-        requireInside(project, current);
+        Path current = rawPath == null || rawPath.trim().isEmpty() ? project : guard.requireExistingInside(project, project.resolve(rawPath));
         if (!Files.isDirectory(current)) throw new ApiException(HttpStatus.NOT_FOUND, "DIRECTORY_NOT_FOUND", "目录不存在");
         try {
             return Files.list(current).filter(path -> !path.getFileName().toString().equals(".git"))
+                    .filter(path -> !Files.isSymbolicLink(path))
                     .sorted(Comparator.comparing(path -> (!Files.isDirectory(path)) + ":" + path.getFileName().toString().toLowerCase()))
                     .map(path -> entry(project, path)).collect(Collectors.toList());
         } catch (IOException exception) { throw new ApiException(HttpStatus.INTERNAL_SERVER_ERROR, "FILES_READ_FAILED", "无法读取文件树"); }
@@ -37,8 +37,7 @@ public class ProjectFileService {
     public Map<String, Object> content(String rawProject, String rawFile) {
         Path project = guard.requireDirectory(rawProject);
         if (rawFile == null || rawFile.trim().isEmpty()) throw new ApiException(HttpStatus.BAD_REQUEST, "FILE_REQUIRED", "请选择文件");
-        Path file = project.resolve(rawFile).normalize();
-        requireInside(project, file);
+        Path file = guard.requireExistingInside(project, project.resolve(rawFile));
         if (!Files.isRegularFile(file)) throw new ApiException(HttpStatus.NOT_FOUND, "FILE_NOT_FOUND", "文件不存在");
         try {
             long size = Files.size(file);
@@ -68,7 +67,4 @@ public class ProjectFileService {
         return item;
     }
 
-    private void requireInside(Path project, Path path) {
-        if (!path.startsWith(project)) throw new ApiException(HttpStatus.BAD_REQUEST, "INVALID_FILE_PATH", "文件路径不合法");
-    }
 }

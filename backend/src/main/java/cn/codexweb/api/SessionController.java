@@ -21,7 +21,7 @@ public class SessionController {
     @GetMapping("/api/sessions") public List<Session> all() { return sessions.all(); }
     @GetMapping("/api/sessions/{id}") public Session get(@PathVariable String id) { return require(id); }
     @GetMapping("/api/sessions/{id}/events") public List<?> events(@PathVariable String id, @RequestParam(value = "after", required = false) String after) { return codex.events(id, after); }
-    @GetMapping("/api/sessions/{id}/history") public cn.codexweb.model.SessionHistory history(@PathVariable String id) { return codex.history(id); }
+    @GetMapping("/api/sessions/{id}/history") public cn.codexweb.model.SessionHistory history(@PathVariable String id, @RequestParam(value = "before", defaultValue = "0") int before, @RequestParam(value = "limit", defaultValue = "0") int limit) { return codex.history(id, before, limit); }
     @GetMapping(value = "/api/sessions/{id}/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE) public SseEmitter stream(@PathVariable String id, HttpServletResponse response) {
         require(id);
         response.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
@@ -36,7 +36,7 @@ public class SessionController {
     @PostMapping("/api/sessions/{id}/queue/{queueId}/steer") public Session steerQueued(@PathVariable String id, @PathVariable String queueId) { codex.steerQueued(id, queueId); return require(id); }
     @DeleteMapping("/api/sessions/{id}/queue/{queueId}") public Session deleteQueued(@PathVariable String id, @PathVariable String queueId) { codex.deleteQueued(id, queueId); return require(id); }
     @PostMapping("/api/sessions/{id}/cancel") public Session cancel(@PathVariable String id) { codex.cancel(id); return require(id); }
-    @PostMapping("/api/sessions/{id}/approval") public Session approval(@PathVariable String id, @RequestBody Map<String, Object> body) { codex.approval(id, body == null || body.get("requestId") == null ? null : Long.valueOf(String.valueOf(body.get("requestId"))), body == null ? null : text(body.get("decision"))); return require(id); }
+    @PostMapping("/api/sessions/{id}/approval") public Session approval(@PathVariable String id, @RequestBody Map<String, Object> body) { codex.approval(id, approvalRequestId(body), body == null ? null : text(body.get("decision"))); return require(id); }
     @GetMapping("/api/sessions/{id}/export") public Map<String, Object> export(@PathVariable String id) { Session session = require(id); Map<String, Object> result = new java.util.LinkedHashMap<String, Object>(); result.put("session", session); result.put("events", codex.events(id)); return result; }
     @PostMapping("/api/projects/{projectId}/sessions") public Session create(@PathVariable String projectId, @RequestBody(required = false) Map<String, String> body) { requireProject(projectId); return sessions.create(projectId, body == null ? null : body.get("title")); }
     @PutMapping("/api/sessions/{id}") public Session update(@PathVariable String id, @RequestBody Map<String, Object> body) { Session session = require(id); if (body.get("title") != null) session.title = String.valueOf(body.get("title")); sessions.save(session); return session; }
@@ -44,6 +44,11 @@ public class SessionController {
     @PostMapping("/api/sessions/{id}/unarchive") public Session unarchive(@PathVariable String id) { Session session = require(id); session.archived = false; session.status = "IDLE"; sessions.save(session); return session; }
     @DeleteMapping("/api/sessions/{id}") @ResponseStatus(HttpStatus.NO_CONTENT) public void delete(@PathVariable String id) { require(id); sessions.delete(id); }
     private String text(Object value) { return value == null ? null : String.valueOf(value); }
+    private Long approvalRequestId(Map<String, Object> body) {
+        if (body == null || body.get("requestId") == null) return null;
+        try { return Long.valueOf(String.valueOf(body.get("requestId"))); }
+        catch (NumberFormatException exception) { throw new ApiException(HttpStatus.BAD_REQUEST, "APPROVAL_REQUEST_ID_INVALID", "审批请求编号不合法"); }
+    }
     private List<String> strings(Object value) { List<String> result = new java.util.ArrayList<String>(); if (value instanceof Iterable) for (Object item : (Iterable<?>) value) result.add(text(item)); return result; }
     private Session require(String id) { Session result = sessions.find(id); if (result == null) throw new ApiException(HttpStatus.NOT_FOUND, "SESSION_NOT_FOUND", "会话不存在"); return result; }
     private Project requireProject(String id) { Project result = projects.find(id); if (result == null) throw new ApiException(HttpStatus.NOT_FOUND, "PROJECT_NOT_FOUND", "项目不存在"); return result; }
