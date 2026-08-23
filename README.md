@@ -1,4 +1,4 @@
-# Codex Web Workbench
+# Codex手机端h5和pc端
 
 > 把电脑上的 Codex 变成可以用手机远程控制的 AI 编程工作台。
 
