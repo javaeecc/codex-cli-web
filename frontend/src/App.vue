@@ -313,11 +313,13 @@ export default {
       try {
         const previousBefore = this.historyBefore
         const [olderResult, latestResult] = await Promise.all([
-          api.history(this.currentSession.id, { params: { before: previousBefore, limit: 200 } }),
-          api.history(this.currentSession.id, { params: { before: 0, limit: 200 } })
+          api.history(this.currentSession.id, { params: { before: previousBefore, limit: 1000 } }),
+          api.history(this.currentSession.id, { params: { before: 0, limit: 1000 } })
         ])
         const page = olderResult.data || {}
         const latest = latestResult.data || {}
+        const nextBefore = Number(page.nextBefore)
+        const cursorProgressed = Number.isFinite(nextBefore) && nextBefore > previousBefore
         const combined = (page.events || []).concat(this.historyEvents, latest.events || [])
         const seen = {}
         this.historyEvents = combined.filter(event => {
@@ -325,8 +327,10 @@ export default {
           seen[event.id] = true
           return true
         })
-        this.historyHasMore = !!page.hasMore
-        this.historyBefore = Number(page.nextBefore || 0)
+        // Stop if the server returns a stale/non-decreasing cursor. Otherwise the
+        // same page can be requested forever when the history changes mid-load.
+        this.historyHasMore = !!page.hasMore && cursorProgressed
+        this.historyBefore = cursorProgressed ? nextBefore : previousBefore
         const lastEventId = this.lastEventId
         this.replayHistoryEvents()
         this.lastEventId = lastEventId
@@ -337,7 +341,7 @@ export default {
       }
     },
     async selectProject (project) { this.stopStatusPolling(); this.closeSocket(); this.currentProject = project; this.currentSession = null; this.messages = []; this.historyEvents = []; this.sessions = []; this.leftCollapsed = true; try { const result = await api.sessions(project.id); this.sessions = result.data; await Promise.all([this.refreshGit(), this.loadFiles()]); if (this.sessions.length) await this.selectSession(this.visibleSessions[0] || this.sessions[0]) } catch (e) { this.notifyError(e) } },
-    async selectSession (session) { this.stopStatusPolling(); if (this.sessionLoadController) this.sessionLoadController.abort(); if (this.liveEventFlushTimer) { clearTimeout(this.liveEventFlushTimer); this.liveEventFlushTimer = null } this.liveEventQueue = []; const generation = this.sessionLoadGeneration + 1; this.sessionLoadGeneration = generation; const controller = new AbortController(); this.sessionLoadController = controller; this.closeSocket(); this.currentSession = session; this.lastDraft = session.lastUserMessage || ''; this.clearApprovalState(); this.followOutput = true; this.errorMessage = ''; this.messages = []; this.historyEvents = []; this.historyHasMore = false; this.historyBefore = 0; this.historyLoading = false; this.activities = []; this.overallOpenState = {}; this.liveStatus = ''; this.activeTurnText = ''; this.diffText = ''; this.selectedFile = ''; this.fileContent = null; this.seenEventIds = {}; this.lastEventRecoveryAt = 0; this.lastEventId = ''; this.leftCollapsed = true; try { const result = await api.history(session.id, { params: { before: 0, limit: 200 }, signal: controller.signal }); if (generation !== this.sessionLoadGeneration || !this.currentSession || this.currentSession.id !== session.id) return; const history = result.data || {}; this.historyEvents = history.events || []; this.historyHasMore = !!history.hasMore; this.historyBefore = Number(history.nextBefore || 0); this.replayHistoryEvents(); this.lastEventId = history.lastEventId || this.lastEventId; this.running = this.sessionHasPendingWork(this.currentSession); if (this.running && !this.liveStatus) this.liveStatus = this.currentSession.status === 'WAITING_APPROVAL' ? '等待审批' : (this.hasQueuedTurns(this.currentSession) ? '队列处理中' : '正在思考'); this.connectSocket(session.id); const recovery = await api.events(session.id, this.lastEventId); if (generation !== this.sessionLoadGeneration || !this.currentSession || this.currentSession.id !== session.id) return; recovery.data.forEach(event => this.applyEvent(event, false)); this.startStatusPolling(session.id); this.scrollToBottomAfterRender() } catch (e) { if (e && e.code === 'ERR_CANCELED') return; if (generation === this.sessionLoadGeneration) this.notifyError(e) } finally { if (this.sessionLoadController === controller) this.sessionLoadController = null } },
+    async selectSession (session) { this.stopStatusPolling(); if (this.sessionLoadController) this.sessionLoadController.abort(); if (this.liveEventFlushTimer) { clearTimeout(this.liveEventFlushTimer); this.liveEventFlushTimer = null } this.liveEventQueue = []; const generation = this.sessionLoadGeneration + 1; this.sessionLoadGeneration = generation; const controller = new AbortController(); this.sessionLoadController = controller; this.closeSocket(); this.currentSession = session; this.lastDraft = session.lastUserMessage || ''; this.clearApprovalState(); this.followOutput = true; this.errorMessage = ''; this.messages = []; this.historyEvents = []; this.historyHasMore = false; this.historyBefore = 0; this.historyLoading = false; this.activities = []; this.overallOpenState = {}; this.liveStatus = ''; this.activeTurnText = ''; this.diffText = ''; this.selectedFile = ''; this.fileContent = null; this.seenEventIds = {}; this.lastEventRecoveryAt = 0; this.lastEventId = ''; this.leftCollapsed = true; try { const result = await api.history(session.id, { params: { before: 0, limit: 1000 }, signal: controller.signal }); if (generation !== this.sessionLoadGeneration || !this.currentSession || this.currentSession.id !== session.id) return; const history = result.data || {}; this.historyEvents = history.events || []; this.historyHasMore = !!history.hasMore; this.historyBefore = Number(history.nextBefore || 0); this.replayHistoryEvents(); this.lastEventId = history.lastEventId || this.lastEventId; this.running = this.sessionHasPendingWork(this.currentSession); if (this.running && !this.liveStatus) this.liveStatus = this.currentSession.status === 'WAITING_APPROVAL' ? '等待审批' : (this.hasQueuedTurns(this.currentSession) ? '队列处理中' : '正在思考'); this.connectSocket(session.id); const recovery = await api.events(session.id, this.lastEventId); if (generation !== this.sessionLoadGeneration || !this.currentSession || this.currentSession.id !== session.id) return; recovery.data.forEach(event => this.applyEvent(event, false)); this.startStatusPolling(session.id); this.scrollToBottomAfterRender() } catch (e) { if (e && e.code === 'ERR_CANCELED') return; if (generation === this.sessionLoadGeneration) this.notifyError(e) } finally { if (this.sessionLoadController === controller) this.sessionLoadController = null } },
     async createSession () { if (!this.currentProject) return; try { const result = await api.createSession(this.currentProject.id, { title: '新建会话' }); this.sessions.unshift(result.data); await this.selectSession(result.data) } catch (e) { this.notifyError(e) } },
     async toggleSessionArchive (session) {
       if (!session) return

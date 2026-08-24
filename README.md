@@ -234,12 +234,17 @@ data/                                运行时生成的本地数据（已被 Git
 ```powershell
 cd backend
 mvn clean package
-
-cd ..\frontend
-npm run build
 ```
 
-后端 JAR 输出到 `backend/target/`，前端静态文件输出到 `frontend/dist/`。当前项目没有配置 Spring Boot 静态资源托管，生产环境需要分别部署后端和前端，并将 `/api` 反向代理到后端。
+Maven 会自动执行前端生产构建，并将 `frontend/dist/` 复制到后端资源目录，最终生成包含前端页面的 JAR。打包完成后只需启动后端：
+
+```powershell
+java -jar target\codex-web.jar
+```
+
+浏览器访问 `http://127.0.0.1:8090/` 即可。前端开发模式仍可使用 `cd frontend; npm run serve`，开发服务器会将 `/api` 代理到后端。
+
+Windows 也可以直接双击项目根目录的 `start-codex-web.bat` 启动。
 
 ## 数据、日志与安全
 

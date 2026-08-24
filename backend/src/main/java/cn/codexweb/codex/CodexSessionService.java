@@ -160,7 +160,10 @@ public class CodexSessionService implements CodexProtocolClient.Listener {
         page.sourceEventCount = full.sourceEventCount;
         page.totalDisplayEventCount = full.events.size();
         page.hasMore = start > 0;
-        page.nextBefore = start;
+        // `before` is the number of newest display events excluded from the
+        // page. Advance it by the page size so each request moves backwards
+        // exactly one page without skipping or repeating events.
+        page.nextBefore = page.hasMore ? full.events.size() - start : 0;
         return page;
     }
 
