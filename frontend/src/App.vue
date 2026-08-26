@@ -3,12 +3,13 @@
   <div v-else class="shell" :class="{ 'left-collapsed': leftCollapsed, 'right-collapsed': rightCollapsed }">
     <AppTopbar :project="currentProject" :branch="currentBranch" :branches="branches" :runtime="runtime" :right-collapsed="rightCollapsed" @toggle-left="leftCollapsed = !leftCollapsed" @toggle-right="rightCollapsed = !rightCollapsed" @checkout-branch="checkoutBranch" @settings="openSettings"></AppTopbar>
     <div v-if="!rightCollapsed" class="mobile-inspector-backdrop" @click="rightCollapsed = true"></div>
+    <div v-if="!leftCollapsed" class="mobile-sidebar-backdrop" @click="leftCollapsed = true"></div>
     <div class="workspace-layout">
       <ProjectSidebar :projects="projects" :current-project="currentProject" :sessions="sessions" :visible-sessions="visibleSessions" :current-session="currentSession" :socket-open="socketOpen" :show-archived="showArchived" :session-search="sessionSearch" :compact-path="compactPath" :status-class="statusClass" :format-session-time="formatSessionTime" @open-workspace="openWorkspacePicker" @select-project="selectProject" @delete-project="deleteProject" @create-session="createSession" @update:session-search="sessionSearch = $event" @select-session="selectSession" @toggle-archive="toggleSessionArchive" @toggle-archived="showArchived = !showArchived"></ProjectSidebar>
-      <ConversationPanel ref="conversationPanel" :project="currentProject" :current-session="currentSession" :messages="messages" :display-messages="displayMessages" :running="running" :live-status="liveStatus" :error-message="errorMessage" :can-steer="canSteer" :sending="sending" :deleting-queue-id="deletingQueueId" :draft="draft" :attachments="attachments" :socket-open="socketOpen" :composer-focused="composerFocused" :history-has-more="historyHasMore" :history-loading="historyLoading" :overall-open="overallOpen" :is-overall-group-active="isOverallGroupActive" :overall-group-status="overallGroupStatus" :thinking-status="thinkingStatus" :is-tool-group-active="isToolGroupActive" :tool-group-status="toolGroupStatus" :activity-status="activityStatus" :render-markdown="renderMarkdown" :format-time="formatTime" @open-workspace="openWorkspacePicker" @message-scroll="handleMessageScroll" @load-older="loadOlderHistory" @overall-toggle="setOverallOpen" @thinking-toggle="setThinkingOpen" @retry="retryLast" @steer="steerQueued" @delete-queued="deleteQueued" @update:draft="draft = $event" @composer-focus="composerFocused = $event" @composer-keydown="handleComposerKeydown" @upload="uploadFiles" @remove-attachment="attachments.splice($event, 1)" @resend-message="resendMessage" @cancel="cancelTurn" @send="sendMessage"></ConversationPanel>
+      <ConversationPanel ref="conversationPanel" :project="currentProject" :current-session="currentSession" :messages="messages" :display-messages="displayMessages" :running="running" :live-status="liveStatus" :error-message="errorMessage" :can-steer="canSteer" :sending="sending" :deleting-queue-id="deletingQueueId" :draft="draft" :attachments="attachments" :socket-open="socketOpen" :composer-focused="composerFocused" :history-has-more="historyHasMore" :history-loading="historyLoading" :show-scroll-bottom="!followOutput" :overall-open="overallOpen" :is-overall-group-active="isOverallGroupActive" :overall-group-status="overallGroupStatus" :thinking-status="thinkingStatus" :is-tool-group-active="isToolGroupActive" :tool-group-status="toolGroupStatus" :activity-status="activityStatus" :render-markdown="renderMarkdown" :format-time="formatTime" @open-workspace="openWorkspacePicker" @message-scroll="handleMessageScroll" @open-local-file="openLocalFile" @scroll-to-bottom="jumpToBottom" @load-older="loadOlderHistory" @overall-toggle="setOverallOpen" @thinking-toggle="setThinkingOpen" @retry="retryLast" @steer="steerQueued" @delete-queued="deleteQueued" @update:draft="draft = $event" @composer-focus="composerFocused = $event" @composer-keydown="handleComposerKeydown" @upload="uploadFiles" @remove-attachment="attachments.splice($event, 1)" @resend-message="resendMessage" @cancel="cancelTurn" @send="sendMessage"></ConversationPanel>
       <InspectorPanel :project="currentProject" :tabs="tabs" :active-tab="activeTab" :git-files="gitFiles" :file-items="fileItems" :file-loading-paths="fileLoadingPaths" :format-file-size="formatFileSize" @update:active-tab="activeTab = $event" @refresh-git="refreshGit" @open-diff="openDiff" @load-files="loadFiles" @toggle-directory="toggleDirectory" @open-file="openFile" @file-unavailable="notifyFileUnavailable"></InspectorPanel>
     </div>
-    <WorkspaceDialogs :workspace-visible="workspaceDialog" :workspace-roots="workspaceRoots" :workspace-items="workspaceItems" :workspace-path="workspacePath" :workspace-parent="workspaceParent" :selected-workspace="selectedWorkspace" :settings-visible="settingsDialog" :settings="settings" :settings-saving="settingsSaving" :approval-visible="approvalDialog" :approval-requests="approvalRequests" :diff-visible="diffDialog" :diff-loading="diffLoading" :diff-lines="diffLines" :selected-file="selectedFile" :file-visible="fileDialog" :file-preview-loading="filePreviewLoading" :file-content="fileContent" @browse="browse" @create-folder="createFolder" @select-workspace="selectedWorkspace = $event" @close-workspace="workspaceDialog = false" @confirm-workspace="confirmWorkspace" @close-settings="settingsDialog = false" @logout="logout" @save-settings="saveSettings" @respond-approval="respondApproval" @close-diff="diffDialog = false" @expand-diff="expandDiffSection" @close-file="fileDialog = false"></WorkspaceDialogs>
+    <WorkspaceDialogs :workspace-visible="workspaceDialog" :workspace-roots="workspaceRoots" :workspace-items="workspaceItems" :workspace-path="workspacePath" :workspace-parent="workspaceParent" :selected-workspace="selectedWorkspace" :settings-visible="settingsDialog" :settings="settings" :settings-saving="settingsSaving" :approval-visible="approvalDialog" :approval-requests="approvalRequests" :diff-visible="diffDialog" :diff-loading="diffLoading" :diff-lines="diffLines" :selected-file="selectedFile" :file-visible="fileDialog" :file-preview-loading="filePreviewLoading" :file-content="fileContent" :file-preview-url="filePreviewUrl" @browse="browse" @create-folder="createFolder" @select-workspace="selectedWorkspace = $event" @close-workspace="workspaceDialog = false" @confirm-workspace="confirmWorkspace" @close-settings="settingsDialog = false" @logout="logout" @save-settings="saveSettings" @respond-approval="respondApproval" @close-diff="diffDialog = false" @expand-diff="expandDiffSection" @close-file="closeFileDialog"></WorkspaceDialogs>
   </div>
 </template>
 
@@ -25,7 +26,7 @@ import WorkspaceDialogs from './components/WorkspaceDialogs.vue'
 
 export default {
   components: { LoginPage, AppTopbar, ProjectSidebar, ConversationPanel, InspectorPanel, WorkspaceDialogs },
-  data () { return { authReady: false, authenticated: false, loginForm: { username: '', password: '' }, loginLoading: false, loginError: '', authSyncInFlight: false, authExpiredHandled: false, authExpiredCleanup: null, projects: [], sessions: [], currentProject: null, currentSession: null, runtime: { running: false }, runtimeTimer: null, displayNow: Date.now(), displayClockTimer: null, settings: { approvalPolicy: 'on-request', model: '', reasoningEffort: '' }, settingsDialog: false, settingsSaving: false, diffDialog: false, diffLoading: false, fileDialog: false, filePreviewLoading: false, socket: null, socketOpen: false, socketRetryTimer: null, socketHealthTimer: null, lastSocketActivityAt: 0, leftCollapsed: false, rightCollapsed: true, activeTab: 'changes', tabs: [{ id: 'changes', label: 'Changes' }, { id: 'files', label: 'Files' }], messages: [], historyEvents: [], historyHasMore: false, historyBefore: 0, historyLoading: false, itemPhases: {}, activities: [], liveStatus: '', draft: '', lastDraft: '', sending: false, deletingQueueId: null, running: false, activeTurnText: '', errorMessage: '', gitFiles: [], currentBranch: '', branches: [], diffText: '', diffExpandedSections: {}, selectedFile: null, fileContent: null, fileItems: [], fileChildrenCache: {}, fileLoadingPaths: {}, fileTreeGeneration: 0, expandedPaths: {}, workspaceDialog: false, workspaceRoots: [], workspaceItems: [], workspacePath: '', workspaceParent: '', selectedWorkspace: '', approvalDialog: false, approvalRequests: [], approvalRequestId: null, approvalCommand: '', composerFocused: false, showArchived: false, sessionSearch: '', attachments: [], statusTimer: null, statusSyncInFlight: false, sessionLoadController: null, sessionLoadGeneration: 0, markdownCache: null, lastEventId: '', seenEventIds: {}, overallOpenState: {}, followOutput: true, liveEventQueue: [], liveEventFlushTimer: null } },
+  data () { return { authReady: false, authenticated: false, loginForm: { username: '', password: '' }, loginLoading: false, loginError: '', authSyncInFlight: false, authExpiredHandled: false, authExpiredCleanup: null, projects: [], sessions: [], currentProject: null, currentSession: null, runtime: { running: false }, runtimeTimer: null, displayNow: Date.now(), displayClockTimer: null, settings: { approvalPolicy: 'on-request', model: '', reasoningEffort: '' }, settingsDialog: false, settingsSaving: false, diffDialog: false, diffLoading: false, fileDialog: false, filePreviewLoading: false, filePreviewUrl: '', socket: null, socketOpen: false, socketRetryTimer: null, socketHealthTimer: null, lastSocketActivityAt: 0, leftCollapsed: false, rightCollapsed: true, activeTab: 'changes', tabs: [{ id: 'changes', label: 'Changes' }, { id: 'files', label: 'Files' }], messages: [], historyEvents: [], historyHasMore: false, historyBefore: 0, historyLoading: false, itemPhases: {}, activities: [], mediaObjectUrls: [], liveStatus: '', draft: '', lastDraft: '', sending: false, deletingQueueId: null, running: false, activeTurnText: '', errorMessage: '', gitFiles: [], currentBranch: '', branches: [], diffText: '', diffExpandedSections: {}, selectedFile: null, fileContent: null, fileItems: [], fileChildrenCache: {}, fileLoadingPaths: {}, fileTreeGeneration: 0, expandedPaths: {}, workspaceDialog: false, workspaceRoots: [], workspaceItems: [], workspacePath: '', workspaceParent: '', selectedWorkspace: '', approvalDialog: false, approvalRequests: [], approvalRequestId: null, approvalCommand: '', composerFocused: false, showArchived: false, sessionSearch: '', attachments: [], statusTimer: null, statusSyncInFlight: false, sessionLoadController: null, sessionLoadGeneration: 0, markdownCache: null, lastEventId: '', seenEventIds: {}, overallOpenState: {}, followOutput: true, liveEventQueue: [], liveEventFlushTimer: null } },
   computed: {
     visibleSessions () {
       const query = this.sessionSearch.trim().toLowerCase()
@@ -172,7 +173,7 @@ export default {
     }
   },
   mounted () { this.displayClockTimer = setInterval(() => { this.displayNow = Date.now() }, 1000); this.authExpiredCleanup = api.onAuthExpired(() => this.handleAuthExpired()); this.checkAuth() },
-  beforeDestroy () { if (this.displayClockTimer) clearInterval(this.displayClockTimer); if (this.liveEventFlushTimer) clearTimeout(this.liveEventFlushTimer); if (this.authExpiredCleanup) this.authExpiredCleanup(); this.closeSocket(); if (this.sessionLoadController) this.sessionLoadController.abort(); this.stopStatusPolling(); this.stopRuntimePolling() },
+  beforeDestroy () { if (this.displayClockTimer) clearInterval(this.displayClockTimer); if (this.liveEventFlushTimer) clearTimeout(this.liveEventFlushTimer); if (this.authExpiredCleanup) this.authExpiredCleanup(); this.closeSocket(); if (this.sessionLoadController) this.sessionLoadController.abort(); this.stopStatusPolling(); this.stopRuntimePolling(); this.releaseMediaObjectUrls(); this.releaseFilePreviewUrl() },
   methods: {
     async checkAuth () {
       try {
@@ -300,6 +301,7 @@ export default {
       } catch (e) { this.notifyError(e) }
     },
     replayHistoryEvents () {
+      this.releaseMediaObjectUrls()
       this.messages = []
       this.activities = []
       this.itemPhases = {}
@@ -486,6 +488,7 @@ export default {
           if (this.currentSession && this.currentSession.id === sessionId) eventsResult.data.forEach(event => this.applyEvent(event, false))
         }
         if (!pending) {
+          this.clearApprovalState()
           this.liveStatus = ''
           this.stopStatusPolling()
         }
@@ -640,6 +643,7 @@ export default {
     },
     async openFile (item) {
       if (!item || !item.viewable) return this.notifyFileUnavailable(item)
+      this.releaseFilePreviewUrl()
       this.fileDialog = true
       this.filePreviewLoading = true
       this.fileContent = null
@@ -652,6 +656,43 @@ export default {
       } finally {
         this.filePreviewLoading = false
       }
+    },
+    async openLocalFile (rawPath) {
+      if (!this.currentProject || !rawPath) return this.notifyFileUnavailable()
+      const projectRoot = String(this.currentProject.path || '').replace(/\\/g, '/').replace(/\/+$/, '')
+      const normalized = String(rawPath).replace(/\\/g, '/')
+      const rootLower = projectRoot.toLowerCase()
+      const normalizedLower = normalized.toLowerCase()
+      if (!projectRoot || !(normalizedLower === rootLower || normalizedLower.startsWith(`${rootLower}/`))) {
+        return this.$message.warning('只能打开当前项目工作空间内的文件')
+      }
+      const relative = normalized.slice(projectRoot.length).replace(/^\/+/, '')
+      if (!relative) return this.$message.warning('请选择一个文件')
+      const item = { path: relative, viewable: true, size: 0 }
+      if (!/\.(png|jpe?g|gif|webp|bmp)$/i.test(relative)) return this.openFile(item)
+      this.releaseFilePreviewUrl()
+      this.fileDialog = true
+      this.filePreviewLoading = true
+      this.fileContent = { path: relative, binary: true }
+      try {
+        const result = await api.rawFile(this.currentProject.id, relative)
+        this.filePreviewUrl = URL.createObjectURL(result.data)
+      } catch (e) {
+        this.fileDialog = false
+        this.fileContent = null
+        this.notifyError(e)
+      } finally {
+        this.filePreviewLoading = false
+      }
+    },
+    releaseFilePreviewUrl () {
+      if (this.filePreviewUrl) URL.revokeObjectURL(this.filePreviewUrl)
+      this.filePreviewUrl = ''
+    },
+    closeFileDialog () {
+      this.fileDialog = false
+      this.fileContent = null
+      this.releaseFilePreviewUrl()
     },
     notifyFileUnavailable (item) {
       if (item && Number(item.size) > 2 * 1024 * 1024) {
@@ -710,12 +751,55 @@ export default {
         return sameDay ? this.formatTime(value) : `${date.toLocaleDateString([], { month: '2-digit', day: '2-digit' })} ${this.formatTime(value)}`
       } catch (e) { return '' }
     },
-    renderMarkdown (text) { const value = text || ''; if (!this.markdownCache) this.markdownCache = new Map(); if (this.markdownCache.has(value)) return this.markdownCache.get(value); const html = DOMPurify.sanitize(marked.parse(value, { headerIds: false, mangle: false })); this.markdownCache.set(value, html); if (this.markdownCache.size > 128) this.markdownCache.delete(this.markdownCache.keys().next().value); return html },
+    renderMarkdown (text) {
+      const value = text || ''
+      if (!this.markdownCache) this.markdownCache = new Map()
+      if (this.markdownCache.has(value)) return this.markdownCache.get(value)
+      const container = document.createElement('div')
+      container.innerHTML = marked.parse(value, { headerIds: false, mangle: false })
+      container.querySelectorAll('a, img').forEach(element => {
+        const attribute = element.tagName === 'IMG' ? 'src' : 'href'
+        const rawPath = element.getAttribute(attribute)
+        const localPath = this.localPathFromUrl(rawPath)
+        if (!localPath) return
+        if (element.tagName === 'IMG') {
+          const link = document.createElement('a')
+          link.textContent = element.getAttribute('alt') || localPath
+          element.replaceWith(link)
+          element = link
+        }
+        element.setAttribute('href', '#')
+        element.setAttribute('data-local-path', localPath)
+        element.setAttribute('title', '打开本地文件')
+      })
+      const html = DOMPurify.sanitize(container.innerHTML, { ADD_ATTR: ['data-local-path'] })
+      this.markdownCache.set(value, html)
+      if (this.markdownCache.size > 128) this.markdownCache.delete(this.markdownCache.keys().next().value)
+      return html
+    },
+    localPathFromUrl (value) {
+      if (!value) return ''
+      let decoded = String(value)
+      try { decoded = decodeURIComponent(decoded) } catch (e) {}
+      decoded = decoded.replace(/\\/g, '/')
+      if (/^[A-Za-z]:\//.test(decoded) || (decoded.startsWith('/') && !/^\/\//.test(decoded))) return decoded
+      if (this.currentProject && !/^[a-z][a-z0-9+.-]*:/i.test(decoded) && /\.(png|jpe?g|gif|webp|bmp)$/i.test(decoded)) {
+        const root = String(this.currentProject.path || '').replace(/\\/g, '/').replace(/\/+$/, '')
+        if (root && !decoded.includes('..')) return `${root}/${decoded.replace(/^\/+/, '')}`
+      }
+      return ''
+    },
     handleMessageScroll () {
       const box = this.$refs.messageScroll || (this.$refs.conversationPanel && this.$refs.conversationPanel.$refs.messageScroll)
       if (!box) return
       const distanceFromBottom = box.scrollHeight - box.clientHeight - box.scrollTop
       this.followOutput = distanceFromBottom <= 48
+    },
+    jumpToBottom () {
+      const box = this.$refs.messageScroll || (this.$refs.conversationPanel && this.$refs.conversationPanel.$refs.messageScroll)
+      if (!box) return
+      this.followOutput = true
+      box.scrollTo({ top: box.scrollHeight, behavior: 'auto' })
     },
     scrollToBottom () {
       const box = this.$refs.messageScroll || (this.$refs.conversationPanel && this.$refs.conversationPanel.$refs.messageScroll)
@@ -733,7 +817,27 @@ export default {
         await api.respondApproval(this.currentSession.id, { requestId, decision })
         this.removeApprovalRequest(requestId)
         if (this.currentSession && this.approvalRequests.length === 0 && this.currentSession.status === 'WAITING_APPROVAL') this.$set(this.currentSession, 'status', 'RUNNING')
-      } catch (e) { this.notifyError(e) }
+      } catch (e) {
+        // Approval requests live in the Codex process. A backend/Codex restart
+        // invalidates the in-memory request even though the old UI event can
+        // still be replayed from session history. Remove it so the modal cannot
+        // trap the composer behind an unclosable, expired approval.
+        const status = e && e.response && e.response.status
+        const code = e && e.response && e.response.data && e.response.data.code
+        if (status === 409 && code === 'APPROVAL_NOT_PENDING') {
+          this.removeApprovalRequest(requestId)
+          if (this.currentSession && this.approvalRequests.length === 0) {
+            this.$set(this.currentSession, 'status', 'FAILED')
+            const index = this.sessions.findIndex(item => item.id === this.currentSession.id)
+            if (index >= 0) this.$set(this.sessions[index], 'status', 'FAILED')
+            this.running = false
+            this.liveStatus = ''
+          }
+          this.$message.warning('审批请求已失效，已关闭审批窗口')
+          return
+        }
+        this.notifyError(e)
+      }
     },
     overallOpen (group) { return this.isOverallGroupActive(group) || this.overallOpenState[group.id] === true },
     setOverallOpen (group, event) { if (!this.isOverallGroupActive(group)) this.$set(this.overallOpenState, group.id, event.target.open) },
@@ -829,14 +933,17 @@ export default {
         if (this.currentSession) this.$set(this.currentSession, 'status', 'RUNNING')
         this.running = true
         this.liveStatus = '正在重新连接 Codex'
-      } else if (type === 'tool.call.started' || type === 'tool.call.output' || type === 'tool.call.completed') {
+      } else if (type === 'tool.call.started' || type === 'tool.call.output' || type === 'tool.call.completed' || type === 'tool.call.failed') {
         const payload = data.payload || {}
         const item = payload.item || {}
         const rawId = data.itemId || payload.itemId || item.id || payload.callId
         const phase = data.phase || item.phase || ''
         const command = this.toolValue(payload.command || item.command || payload.cmd || item.cmd || data.command)
-        const output = this.toolValue(payload.output || payload.aggregatedOutput || item.output || item.aggregatedOutput || data.output || data.text)
+        const detail = this.toolValue(payload.changes || payload.patch || payload.arguments || payload.query || payload.url || payload.prompt || payload.tool || item.changes || item.patch || item.arguments || item.query || item.url || item.prompt || item.tool)
+        const output = this.toolValue(payload.output || payload.aggregatedOutput || item.output || item.aggregatedOutput || data.output || data.text || detail)
         const exitCode = payload.exitCode !== undefined ? payload.exitCode : item.exitCode
+        const status = payload.status !== undefined ? payload.status : (item.status !== undefined ? item.status : data.status)
+        const media = data.media || payload.media || item.media
         const title = this.toolTitle(data.method, payload, item, command)
         if (item.type === 'agentMessage' && rawId && phase) {
           this.$set(this.itemPhases, rawId, phase)
@@ -853,19 +960,40 @@ export default {
           if (command) existing.command = command
           if (output) existing.output = output
           if (exitCode !== undefined) existing.exitCode = exitCode
+          if (status !== undefined) this.$set(existing, 'status', status)
+          if (detail) this.$set(existing, 'detail', detail)
           if (title !== '其他操作') existing.title = title
           if (type.endsWith('completed')) this.$set(existing, 'completedAt', eventAt)
+          if (type === 'tool.call.failed' || this.activityFailed({ status, exitCode })) existing.state = 'failed'
           existing.state = type.endsWith('completed') ? '完成' : '运行中'
         } else {
+          const failed = type === 'tool.call.failed' || this.activityFailed({ status, exitCode })
           const activity = { id: `${type}-${Date.now()}-${Math.random()}`, rawId: activityId, icon: 'el-icon-cpu', title, command, output, exitCode, state: type.endsWith('completed') ? '完成' : '运行中', startedAt: eventAt, completedAt: type.endsWith('completed') ? eventAt : null }
           this.activities.push(activity)
+          if (failed) activity.state = 'failed'
           this.messages.push({ id: `tool-${activity.id}`, role: 'tool', timestamp, activity })
+        }
+        const updatedActivity = this.activities.find(activity => activity.rawId === activityId)
+        if (updatedActivity) {
+          if (media) this.$set(updatedActivity, 'media', media)
+          if (status !== undefined) this.$set(updatedActivity, 'status', status)
+          if (detail) this.$set(updatedActivity, 'detail', detail)
+          if (media) this.loadActivityMedia(updatedActivity, media, this.currentSession && this.currentSession.id)
+          if (type === 'tool.call.failed' || this.activityFailed({ status, exitCode })) {
+            updatedActivity.state = 'failed'
+            this.$set(updatedActivity, 'completedAt', eventAt)
+          }
         }
         if (!replay) {
           this.running = true
           this.liveStatus = ''
         }
       } else if (type === 'approval.request') {
+        // Approval requests are process-local. Do not resurrect a historical
+        // request when startup recovery already settled this session, while
+        // still allowing a genuinely live WAITING_APPROVAL session to recover
+        // its dialog after a normal page refresh.
+        if (replay && (!this.currentSession || this.currentSession.status !== 'WAITING_APPROVAL')) return
         if (this.currentSession) this.$set(this.currentSession, 'status', 'WAITING_APPROVAL')
         const payload = data.payload || {}
         const requestId = data.requestId !== undefined && data.requestId !== null ? data.requestId : payload.requestId
@@ -917,8 +1045,14 @@ export default {
       const remainder = seconds % 60
       return remainder ? `${minutes} 分 ${remainder} 秒` : `${minutes} 分钟`
     }
+    ,activityFailed (activity) {
+      if (!activity) return false
+      const status = String(activity.status || activity.state || '').toLowerCase()
+      return status.includes('fail') || status.includes('error') || status.includes('reject') || (Number.isFinite(Number(activity.exitCode)) && Number(activity.exitCode) !== 0)
+    }
     ,activityStatus (activity) {
       if (!activity) return ''
+      if (this.activityFailed(activity)) return '失败'
       if (activity.state === '运行中') return `正在工作 · ${this.durationText(activity.startedAt)}`
       if (Number.isFinite(activity.startedAt) && Number.isFinite(activity.completedAt)) return `耗时 ${this.durationText(activity.startedAt, activity.completedAt)}`
       return '已完成'
@@ -936,6 +1070,7 @@ export default {
     }
     ,toolGroupStatus (group) {
       const activities = this.toolGroupActivities(group)
+      if (activities.some(activity => this.activityFailed(activity))) return '存在失败操作'
       const startedAt = activities.map(activity => activity.startedAt).filter(value => Number.isFinite(value))
       const completedAt = activities.map(activity => activity.completedAt).filter(value => Number.isFinite(value))
       const start = startedAt.length ? Math.min(...startedAt) : null
@@ -982,10 +1117,32 @@ export default {
       if (typeof value === 'object') return JSON.stringify(value, null, 2)
       return String(value)
     }
+    ,releaseMediaObjectUrls () {
+      this.mediaObjectUrls.forEach(url => URL.revokeObjectURL(url))
+      this.mediaObjectUrls = []
+    }
+    ,loadActivityMedia (activity, media, sessionId) {
+      if (!activity || !media || activity.imageUrl || activity.mediaLoading || !media.id || !sessionId) return
+      this.$set(activity, 'mediaLoading', true)
+      api.media(sessionId, media.id).then(result => {
+        const url = URL.createObjectURL(result.data)
+        if (!this.currentSession || this.currentSession.id !== sessionId) {
+          URL.revokeObjectURL(url)
+          return
+        }
+        this.mediaObjectUrls.push(url)
+        this.$set(activity, 'imageUrl', url)
+      }).catch(() => {}).finally(() => {
+        this.$set(activity, 'mediaLoading', false)
+      })
+    }
     ,toolTitle (method, payload, item, command) {
       const type = String((item && item.type) || (payload && payload.type) || '').toLowerCase()
       const eventMethod = String(method || '').toLowerCase()
       const commandText = String(command || '').toLowerCase()
+      if (type.includes('computer') || type.includes('desktop')) return '操作电脑'
+      if (type.includes('collab') || type.includes('subtask') || type.includes('agent')) return '调用子任务'
+      if (type.includes('search') || type.includes('fetch')) return '搜索网页'
       if (type.includes('command') || type.includes('shell') || eventMethod.includes('commandexecution') || eventMethod.includes('shellcommand')) return '执行命令'
       if (type.includes('filechange') || type.includes('file_change') || type.includes('patch') || eventMethod.includes('filechange') || eventMethod.includes('applypatch')) return '修改文件'
       if (type.includes('fileread') || type.includes('file_read') || type.includes('readfile') || eventMethod.includes('fileread') || eventMethod.includes('readfile')) return '查看文件'

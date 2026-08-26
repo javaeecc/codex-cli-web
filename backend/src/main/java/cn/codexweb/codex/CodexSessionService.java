@@ -12,6 +12,7 @@ import cn.codexweb.storage.AppSettingsStore;
 import cn.codexweb.storage.SessionStore;
 import cn.codexweb.workspace.WorkspaceGuard;
 import cn.codexweb.config.CodexWebProperties;
+import cn.codexweb.files.SessionMediaService;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.http.HttpStatus;
@@ -42,6 +43,7 @@ public class CodexSessionService implements CodexProtocolClient.Listener {
     private final WorkspaceGuard guard;
     private final CodexWebProperties properties;
     private final AppSettingsStore appSettings;
+    private final SessionMediaService sessionMedia;
     private final ObjectMapper mapper = new ObjectMapper();
     private final Map<String, String> threadSessions = new ConcurrentHashMap<String, String>();
     private final Map<String, Long> pendingThreadStarts = new ConcurrentHashMap<String, Long>();
@@ -98,8 +100,8 @@ public class CodexSessionService implements CodexProtocolClient.Listener {
         }
     }
 
-    public CodexSessionService(SessionStore sessions, ProjectStore projects, CodexProcessManager processManager, SseHub hub, WorkspaceGuard guard, CodexWebProperties properties, AppSettingsStore appSettings) {
-        this.sessions = sessions; this.projects = projects; this.processManager = processManager; this.hub = hub; this.guard = guard; this.properties = properties; this.appSettings = appSettings;
+    public CodexSessionService(SessionStore sessions, ProjectStore projects, CodexProcessManager processManager, SseHub hub, WorkspaceGuard guard, CodexWebProperties properties, AppSettingsStore appSettings, SessionMediaService sessionMedia) {
+        this.sessions = sessions; this.projects = projects; this.processManager = processManager; this.hub = hub; this.guard = guard; this.properties = properties; this.appSettings = appSettings; this.sessionMedia = sessionMedia;
     }
 
     @PostConstruct
@@ -193,7 +195,7 @@ public class CodexSessionService implements CodexProtocolClient.Listener {
                 target.timestamp = event.timestamp;
                 continue;
             }
-            if ("tool.call.started".equals(event.type) || "tool.call.output".equals(event.type) || "tool.call.completed".equals(event.type)) {
+            if ("tool.call.started".equals(event.type) || "tool.call.output".equals(event.type) || "tool.call.completed".equals(event.type) || "tool.call.failed".equals(event.type)) {
                 Map<String, Object> eventPayload = mapValue(event.data, "payload");
                 String rawId = eventValue(event, "itemId");
                 if (rawId == null) rawId = eventValue(event, "callId");
@@ -249,6 +251,9 @@ public class CodexSessionService implements CodexProtocolClient.Listener {
          copyLimitedValue(event.data, data, "aggregatedOutput");
         copyValue(event.data, data, "exitCode");
         copyValue(event.data, data, "status");
+        copyValue(event.data, data, "imageUrl");
+        copyValue(event.data, data, "imagePath");
+        copyValue(event.data, data, "media");
         Map<String, Object> payload = mapValue(event.data, "payload");
         if (payload != null) {
             Map<String, Object> compactPayload = new LinkedHashMap<String, Object>();
@@ -258,7 +263,23 @@ public class CodexSessionService implements CodexProtocolClient.Listener {
              copyLimitedValue(payload, compactPayload, "output");
              copyLimitedValue(payload, compactPayload, "aggregatedOutput");
             copyValue(payload, compactPayload, "exitCode");
-            copyValue(payload, compactPayload, "status");
+             copyValue(payload, compactPayload, "status");
+             copyValue(payload, compactPayload, "type");
+             copyValue(payload, compactPayload, "path");
+             copyValue(payload, compactPayload, "savedPath");
+             copyValue(payload, compactPayload, "imageUrl");
+             copyValue(payload, compactPayload, "image_url");
+             copyValue(payload, compactPayload, "result");
+             copyValue(payload, compactPayload, "success");
+             copyValue(payload, compactPayload, "error");
+             copyValue(payload, compactPayload, "changes");
+             copyValue(payload, compactPayload, "query");
+             copyValue(payload, compactPayload, "url");
+             copyValue(payload, compactPayload, "prompt");
+             copyValue(payload, compactPayload, "tool");
+             copyValue(payload, compactPayload, "server");
+             copyValue(payload, compactPayload, "arguments");
+             copyValue(payload, compactPayload, "contentItems");
             Map<String, Object> item = mapValue(payload, "item");
             if (item != null) {
                 Map<String, Object> compactItem = new LinkedHashMap<String, Object>();
@@ -269,7 +290,22 @@ public class CodexSessionService implements CodexProtocolClient.Listener {
                  copyLimitedValue(item, compactItem, "output");
                  copyLimitedValue(item, compactItem, "aggregatedOutput");
                 copyValue(item, compactItem, "exitCode");
-                copyValue(item, compactItem, "status");
+                 copyValue(item, compactItem, "status");
+                 copyValue(item, compactItem, "path");
+                 copyValue(item, compactItem, "savedPath");
+                 copyValue(item, compactItem, "imageUrl");
+                 copyValue(item, compactItem, "image_url");
+                 copyValue(item, compactItem, "result");
+                 copyValue(item, compactItem, "success");
+                 copyValue(item, compactItem, "error");
+                 copyValue(item, compactItem, "changes");
+                 copyValue(item, compactItem, "query");
+                 copyValue(item, compactItem, "url");
+                 copyValue(item, compactItem, "prompt");
+                 copyValue(item, compactItem, "tool");
+                 copyValue(item, compactItem, "server");
+                 copyValue(item, compactItem, "arguments");
+                 copyValue(item, compactItem, "contentItems");
                 compactPayload.put("item", compactItem);
             }
             data.put("payload", compactPayload);
@@ -717,6 +753,18 @@ public class CodexSessionService implements CodexProtocolClient.Listener {
         if (pending == null || pending.generation != session.turnGeneration
                 || !java.util.Objects.equals(pending.threadId, session.codexThreadId)
                 || (pending.turnId != null && !java.util.Objects.equals(pending.turnId, session.currentTurnId))) {
+            // Pending approvals are intentionally in-memory. After a backend
+            // or Codex restart, a replayed historical request can reach this
+            // endpoint although it no longer exists in the live process. Once
+            // no other approval remains, settle the session so it cannot stay
+            // WAITING_APPROVAL forever.
+            if (!hasPendingApprovals(sessionId) && "WAITING_APPROVAL".equals(session.status)) {
+                session.status = "FAILED";
+                session.currentTurnId = null;
+                session.steeringAvailable = false;
+                sessions.save(session);
+                append(session, "error", map("message", "审批请求已失效，上一回合已中断"));
+            }
             throw new ApiException(HttpStatus.CONFLICT, "APPROVAL_NOT_PENDING", "审批请求已过期或不属于当前回合");
         }
         CodexProtocolClient client = processManager.client();
@@ -809,6 +857,10 @@ public class CodexSessionService implements CodexProtocolClient.Listener {
         String phase = findText(params, "phase");
         if (phase == null) phase = findText(params == null ? null : params.get("item"), "phase");
         if (phase != null) data.put("phase", phase);
+        if ("tool.call.output".equals(normalized) || "tool.call.completed".equals(normalized)) {
+            Map<String, Object> media = sessionMedia.captureImage(session, data);
+            if (media != null) data.put("media", media);
+        }
         if (normalized.equals("turn.started")) {
             String turnId = eventTurnId;
             if (turnId != null) {
@@ -906,6 +958,8 @@ public class CodexSessionService implements CodexProtocolClient.Listener {
         if (value.equals("turn/completed") || value.contains("turncompleted")) return "turn.completed";
         if (value.contains("turn/diff") || value.contains("diffupdated")) return "diff.updated";
         if (value.contains("agentmessage") && value.contains("delta")) return "agent.message.delta";
+        if (value.contains("item/failed") || value.contains("itemfailed") || value.contains("item/error") || value.contains("itemerror")) return "tool.call.failed";
+        if (value.contains("item/updated") || value.contains("itemupdated") || value.contains("item/update") || value.contains("item/output") || value.contains("item/delta")) return "tool.call.output";
         if (value.contains("commandexecution") && value.contains("output")) return "tool.call.output";
         if (value.contains("filechange") && (value.contains("output") || value.contains("patchupdated"))) return "tool.call.output";
         if (value.contains("item/started") || value.contains("itemstarted")) return "tool.call.started";
@@ -996,6 +1050,7 @@ public class CodexSessionService implements CodexProtocolClient.Listener {
         copyValue(source, result, "requestId");
         copyValue(source, result, "queueId");
         copyValue(source, result, "queuedTurnCount");
+        copyValue(source, result, "media");
         Map<String, Object> payload = mapValue(source, "payload");
         if (payload == null) return result;
         Map<String, Object> compactPayload = new LinkedHashMap<String, Object>();

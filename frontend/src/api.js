@@ -51,6 +51,7 @@ export default {
   session: id => client.get(`/sessions/${id}`),
   events: (id, afterEventId) => client.get(`/sessions/${id}/events`, { params: afterEventId ? { after: afterEventId } : {} }),
   history: (id, config) => client.get(`/sessions/${id}/history`, config),
+  media: (id, mediaId) => client.get(`/sessions/${id}/media/${encodeURIComponent(mediaId)}`, { responseType: 'blob' }),
   streamUrl: id => `/api/sessions/${encodeURIComponent(id)}/stream`,
   streamHeaders: () => jwt ? { Authorization: `Bearer ${jwt}` } : {},
   startTurn: (id, payload) => client.post(`/sessions/${id}/turns`, payload),
@@ -73,6 +74,7 @@ export default {
   diff: (id, file) => client.get(`/projects/${id}/git/diff`, { params: file ? { file } : {} }),
   files: (id, path) => client.get(`/projects/${id}/files`, { params: path ? { path } : {} }),
   content: (id, path) => client.get(`/projects/${id}/files/content`, { params: { path } }),
+  rawFile: (id, path) => client.get(`/projects/${id}/files/raw`, { params: { path }, responseType: 'blob' }),
   upload: (id, file) => {
     const form = new FormData()
     form.append('file', file)

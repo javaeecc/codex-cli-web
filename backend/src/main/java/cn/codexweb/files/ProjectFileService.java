@@ -3,6 +3,9 @@ package cn.codexweb.files;
 import cn.codexweb.api.ApiException;
 import cn.codexweb.workspace.WorkspaceGuard;
 import org.springframework.http.HttpStatus;
+import org.springframework.core.io.FileSystemResource;
+import org.springframework.core.io.Resource;
+import org.springframework.http.MediaType;
 import org.springframework.stereotype.Service;
 
 import java.io.IOException;
@@ -51,6 +54,23 @@ public class ProjectFileService {
         } catch (IOException exception) { throw new ApiException(HttpStatus.INTERNAL_SERVER_ERROR, "FILE_READ_FAILED", "无法读取文件"); }
     }
 
+    public RawFile raw(String rawProject, String rawFile) {
+        Path project = guard.requireDirectory(rawProject);
+        if (rawFile == null || rawFile.trim().isEmpty()) throw new ApiException(HttpStatus.BAD_REQUEST, "FILE_REQUIRED", "File path is required");
+        Path file = guard.requireExistingInside(project, project.resolve(rawFile));
+        if (!Files.isRegularFile(file)) throw new ApiException(HttpStatus.NOT_FOUND, "FILE_NOT_FOUND", "File does not exist");
+        try {
+            if (!file.getFileName().toString().toLowerCase().matches(".*\\.(png|jpe?g|gif|webp|bmp)$") || Files.size(file) > 20L * 1024L * 1024L) {
+                throw new ApiException(HttpStatus.BAD_REQUEST, "FILE_TYPE_NOT_SUPPORTED", "Only image files up to 20 MB can be previewed");
+            }
+            String mime = Files.probeContentType(file);
+            if (mime == null || !mime.startsWith("image/")) mime = MediaType.APPLICATION_OCTET_STREAM_VALUE;
+            return new RawFile(new FileSystemResource(file), MediaType.parseMediaType(mime));
+        } catch (IOException | IllegalArgumentException exception) {
+            throw new ApiException(HttpStatus.INTERNAL_SERVER_ERROR, "FILE_READ_FAILED", "Unable to read file");
+        }
+    }
+
     private Map<String, Object> entry(Path project, Path path) {
         Map<String, Object> item = new HashMap<String, Object>();
         item.put("name", path.getFileName().toString());
@@ -65,6 +85,12 @@ public class ProjectFileService {
             } catch (IOException ignored) { item.put("size", 0L); item.put("viewable", false); }
         }
         return item;
+    }
+
+    public static class RawFile {
+        public final Resource resource;
+        public final MediaType mediaType;
+        public RawFile(Resource resource, MediaType mediaType) { this.resource = resource; this.mediaType = mediaType; }
     }
 
 }

@@ -5,8 +5,11 @@ import cn.codexweb.model.Session;
 import cn.codexweb.storage.ProjectStore;
 import cn.codexweb.storage.SessionStore;
 import cn.codexweb.codex.CodexSessionService;
+import cn.codexweb.files.SessionMediaService;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
+import org.springframework.core.io.Resource;
+import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
@@ -16,12 +19,17 @@ import javax.servlet.http.HttpServletResponse;
 
 @RestController
 public class SessionController {
-    private final SessionStore sessions; private final ProjectStore projects; private final CodexSessionService codex; private final cn.codexweb.codex.SseHub streams;
-    public SessionController(SessionStore sessions, ProjectStore projects, CodexSessionService codex, cn.codexweb.codex.SseHub streams) { this.sessions = sessions; this.projects = projects; this.codex = codex; this.streams = streams; }
+    private final SessionStore sessions; private final ProjectStore projects; private final CodexSessionService codex; private final cn.codexweb.codex.SseHub streams; private final SessionMediaService media;
+    public SessionController(SessionStore sessions, ProjectStore projects, CodexSessionService codex, cn.codexweb.codex.SseHub streams, SessionMediaService media) { this.sessions = sessions; this.projects = projects; this.codex = codex; this.streams = streams; this.media = media; }
     @GetMapping("/api/sessions") public List<Session> all() { return sessions.all(); }
     @GetMapping("/api/sessions/{id}") public Session get(@PathVariable String id) { return require(id); }
     @GetMapping("/api/sessions/{id}/events") public List<?> events(@PathVariable String id, @RequestParam(value = "after", required = false) String after) { return codex.events(id, after); }
     @GetMapping("/api/sessions/{id}/history") public cn.codexweb.model.SessionHistory history(@PathVariable String id, @RequestParam(value = "before", defaultValue = "0") int before, @RequestParam(value = "limit", defaultValue = "0") int limit) { return codex.history(id, before, limit); }
+    @GetMapping("/api/sessions/{id}/media/{mediaId}") public ResponseEntity<Resource> media(@PathVariable String id, @PathVariable String mediaId) {
+        Session session = require(id);
+        SessionMediaService.MediaResource result = media.open(session, mediaId);
+        return ResponseEntity.ok().contentType(result.mediaType).header("Cache-Control", "no-store").body(result.resource);
+    }
     @GetMapping(value = "/api/sessions/{id}/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE) public SseEmitter stream(@PathVariable String id, HttpServletResponse response) {
         require(id);
         response.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");

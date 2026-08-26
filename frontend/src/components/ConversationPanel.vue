@@ -1,10 +1,11 @@
 <template>
   <main class="conversation panel-border">
     <div class="conversation-empty" v-if="!currentSession"><div class="empty-glyph">C</div><h2>准备开始</h2><p>选择一个工作空间，创建会话，然后把任务交给 Codex。</p><el-button type="primary" icon="el-icon-folder-opened" @click="$emit('open-workspace')">选择工作空间</el-button></div>
-    <div class="message-scroll" ref="messageScroll" v-if="currentSession" @scroll="$emit('message-scroll', $event)">
+    <div class="conversation-body" v-if="currentSession">
+      <div class="message-scroll" ref="messageScroll" @scroll="$emit('message-scroll', $event)" @click="handleContentClick">
       <div v-if="!messages.length" class="first-prompt"><span class="prompt-kicker">{{ project ? project.name : 'Codex' }}</span><h2>你想处理什么？</h2><p>可以从查看项目结构、解释代码或修改功能开始。</p></div>
       <div v-if="historyHasMore" class="history-more"><el-button size="mini" :loading="historyLoading" @click="$emit('load-older')">加载更早内容</el-button></div>
-      <div v-for="(message, index) in displayMessages" :key="message.id || index" class="message-block" :class="message.role">
+       <div v-for="(message, index) in displayMessages" :key="message.id || index" class="message-block" :class="message.role">
         <details v-if="message.role === 'overall-group'" class="overall-thought activity-block" :open="overallOpen(message)" @toggle="$emit('overall-toggle', message, $event)">
           <summary><i :class="isOverallGroupActive(message) ? 'el-icon-loading' : 'el-icon-cpu'"></i><span class="activity-title">总体思考</span><span class="activity-state">{{ overallGroupStatus(message) }}</span></summary>
           <div class="overall-thought-content">
@@ -12,8 +13,8 @@
               <details v-if="item.role === 'thinking'" :key="item.id" class="thinking-block" :open="item.thinkingOpen" @toggle="$emit('thinking-toggle', item, $event)"><summary><i class="el-icon-caret-right"></i><span>思考过程</span><span class="activity-state">{{ thinkingStatus(item) }}</span></summary><div class="thinking-content markdown-body" v-html="renderMarkdown(item.text)"></div></details>
               <template v-else-if="item.role === 'tool-group'">
                 <details :key="item.id" class="work-process-group"><summary><i :class="isToolGroupActive(item) ? 'el-icon-loading' : 'el-icon-cpu'"></i><span class="activity-title">工作过程</span><span class="activity-count">{{ item.activities.length }} 项操作</span><span class="activity-state">{{ toolGroupStatus(item) }}</span></summary>
-                  <div class="activity-group-list"><details v-for="activity in item.activities" :key="activity.id" class="activity-entry"><summary class="activity-entry-heading"><i :class="activity.state === '运行中' ? 'el-icon-loading' : 'el-icon-cpu'"></i><span class="activity-title">{{ activity.title }}</span><span class="activity-state">{{ activityStatus(activity) }}</span></summary><div v-if="activity.command" class="activity-section"><span class="activity-label">命令</span><pre class="activity-code">{{ activity.command }}</pre></div><div v-if="activity.output" class="activity-section"><span class="activity-label">输出</span><pre class="activity-output">{{ activity.output }}</pre></div><div v-if="activity.exitCode !== null && activity.exitCode !== undefined" class="activity-exit-code">退出码 {{ activity.exitCode }}</div></details></div>
-                </details>
+                  <div class="activity-group-list"><details v-for="activity in item.activities" :key="activity.id" class="activity-entry"><summary class="activity-entry-heading"><i :class="activity.state === '运行中' ? 'el-icon-loading' : 'el-icon-cpu'"></i><span class="activity-title">{{ activity.title }}</span><span class="activity-state">{{ activityStatus(activity) }}</span></summary><div v-if="activity.command" class="activity-section"><span class="activity-label">命令</span><pre class="activity-code">{{ activity.command }}</pre></div><div v-if="activity.output" class="activity-section"><span class="activity-label">输出</span><pre class="activity-output">{{ activity.output }}</pre></div><div v-if="activity.exitCode !== null && activity.exitCode !== undefined" class="activity-exit-code">退出码 {{ activity.exitCode }}</div><img v-if="activity.imageUrl" class="activity-image" :src="activity.imageUrl" alt="Codex screenshot"></details></div>
+                 </details>
               </template>
             </template>
           </div>
@@ -25,6 +26,8 @@
       </div>
       <div v-if="running && liveStatus" class="assistant-status" role="status" aria-live="polite"><i class="el-icon-loading"></i><span>{{ liveStatus }}</span></div>
       <div v-if="errorMessage" class="error-banner"><i class="el-icon-warning-outline"></i><span>{{ errorMessage }}</span><el-button size="mini" @click="$emit('retry')">重试</el-button></div>
+      </div>
+      <button v-if="showScrollBottom" class="scroll-bottom-button" type="button" title="回到底部" aria-label="回到底部" @click="$emit('scroll-to-bottom')"><i class="el-icon-arrow-down"></i></button>
     </div>
 
     <div class="composer" v-if="currentSession">
@@ -38,9 +41,15 @@
 <script>
 export default {
   name: 'ConversationPanel',
-  props: { project: Object, currentSession: Object, messages: Array, displayMessages: Array, running: Boolean, liveStatus: String, errorMessage: String, canSteer: Boolean, sending: Boolean, deletingQueueId: [String, Number], draft: String, attachments: Array, socketOpen: Boolean, composerFocused: Boolean, historyHasMore: Boolean, historyLoading: Boolean, overallOpen: Function, isOverallGroupActive: Function, overallGroupStatus: Function, thinkingStatus: Function, isToolGroupActive: Function, toolGroupStatus: Function, activityStatus: Function, renderMarkdown: Function, formatTime: Function },
+  props: { project: Object, currentSession: Object, messages: Array, displayMessages: Array, running: Boolean, liveStatus: String, errorMessage: String, canSteer: Boolean, sending: Boolean, deletingQueueId: [String, Number], draft: String, attachments: Array, socketOpen: Boolean, composerFocused: Boolean, historyHasMore: Boolean, historyLoading: Boolean, showScrollBottom: Boolean, overallOpen: Function, isOverallGroupActive: Function, overallGroupStatus: Function, thinkingStatus: Function, isToolGroupActive: Function, toolGroupStatus: Function, activityStatus: Function, renderMarkdown: Function, formatTime: Function },
   data () { return { resendMessageId: null } },
   methods: {
+    handleContentClick (event) {
+      const link = event.target && event.target.closest ? event.target.closest('a[data-local-path]') : null
+      if (!link) return
+      event.preventDefault()
+      this.$emit('open-local-file', link.getAttribute('data-local-path'))
+    },
     prepareResend (message) { if (message && message.role === 'user' && !this.sending) this.resendMessageId = message.id },
     submitResend (text) { if (!text || this.sending) return; this.resendMessageId = null; this.$emit('resend-message', text) },
     clearResend () { this.resendMessageId = null }
