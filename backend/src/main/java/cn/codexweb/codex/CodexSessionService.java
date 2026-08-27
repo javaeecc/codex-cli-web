@@ -521,17 +521,40 @@ public class CodexSessionService implements CodexProtocolClient.Listener {
                 if (latest == null || latest.turnGeneration != generation || !"RUNNING".equals(latest.status) || latest.cancelRequested) return;
                 boolean resumed = failure == null && response != null && response.get("thread") != null;
                 if (resumed) {
-                    latest.codexThreadId = threadId;
-                    latest.steeringAvailable = true;
-                    threadSessions.put(threadId, latest.id);
-                    sessions.save(latest);
-                    log.info("Codex 线程已恢复，保留原上下文: sessionId={}, threadId={}, generation={}", latest.id, threadId, generation);
-                    sendTurn(latest, generation, latest.lastUserMessage, attachments, queuedTurn);
+                    String approvalPolicy = appSettings.get().approvalPolicy;
+                    try {
+                        processManager.client().updateThreadSettingsAsync(threadId, approvalPolicy)
+                                .whenComplete((settingsResponse, settingsFailure) -> finishResumedThreadSettings(
+                                        latest.id, generation, queuedTurn, attachments, threadId, approvalPolicy, settingsFailure));
+                    } catch (RuntimeException exception) {
+                        finishResumedThreadSettings(latest.id, generation, queuedTurn, attachments, threadId, approvalPolicy, exception);
+                    }
                     return;
                 }
                 startNewThread(latest, generation, queuedTurn, attachments, threadId, failure);
             }
         });
+    }
+
+    private void finishResumedThreadSettings(String sessionId, long generation, QueuedTurn queuedTurn, java.util.List<String> attachments,
+                                             String threadId, String approvalPolicy, Throwable failure) {
+        synchronized (this) {
+            Session latest = sessions.find(sessionId);
+            if (latest == null || latest.turnGeneration != generation || !"RUNNING".equals(latest.status) || latest.cancelRequested) return;
+            if (failure != null) {
+                log.warn("Codex 恢复线程的权限同步失败，改建新线程以避免使用默认受限权限: sessionId={}, threadId={}, approvalPolicy={}",
+                        latest.id, threadId, approvalPolicy, failure);
+                startNewThread(latest, generation, queuedTurn, attachments, threadId, failure);
+                return;
+            }
+            latest.codexThreadId = threadId;
+            latest.steeringAvailable = true;
+            threadSessions.put(threadId, latest.id);
+            sessions.save(latest);
+            log.info("Codex 线程已恢复并同步权限，保留原上下文: sessionId={}, threadId={}, generation={}, approvalPolicy={}",
+                    latest.id, threadId, generation, approvalPolicy);
+            sendTurn(latest, generation, latest.lastUserMessage, attachments, queuedTurn);
+        }
     }
 
     private void startNewThread(Session session, long generation, QueuedTurn queuedTurn, java.util.List<String> attachments, String staleThreadId, Throwable resumeFailure) {

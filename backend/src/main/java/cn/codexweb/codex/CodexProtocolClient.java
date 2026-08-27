@@ -124,6 +124,16 @@ public class CodexProtocolClient {
         return requestAsync("thread/resume", params);
     }
 
+    public CompletableFuture<JsonNode> updateThreadSettingsAsync(String threadId, String approvalPolicy) {
+        Map<String, Object> params = new HashMap<String, Object>();
+        params.put("threadId", threadId);
+        params.put("approvalPolicy", approvalPolicy);
+        Map<String, Object> sandboxPolicy = new HashMap<String, Object>();
+        sandboxPolicy.put("type", "never".equals(approvalPolicy) ? "dangerFullAccess" : "workspaceWrite");
+        params.put("sandboxPolicy", sandboxPolicy);
+        return requestAsync("thread/settings/update", params);
+    }
+
     private Map<String, Object> threadParams(String cwd, String approvalPolicy, String model) {
         Map<String, Object> params = new HashMap<String, Object>();
         params.put("cwd", cwd);
