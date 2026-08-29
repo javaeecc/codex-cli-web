@@ -772,7 +772,17 @@ export default {
         element.setAttribute('data-local-path', localPath)
         element.setAttribute('title', '打开本地文件')
       })
-      const html = DOMPurify.sanitize(container.innerHTML, { ADD_ATTR: ['data-local-path'] })
+      container.querySelectorAll('pre > code').forEach(code => {
+        const button = document.createElement('button')
+        button.type = 'button'
+        button.className = 'code-copy-button'
+        button.setAttribute('data-copy-code', '')
+        button.setAttribute('title', '复制代码')
+        button.setAttribute('aria-label', '复制代码')
+        button.innerHTML = '<i class="el-icon-document-copy"></i>'
+        code.parentNode.insertBefore(button, code)
+      })
+      const html = DOMPurify.sanitize(container.innerHTML, { ADD_ATTR: ['data-local-path', 'data-copy-code', 'aria-label'] })
       this.markdownCache.set(value, html)
       if (this.markdownCache.size > 128) this.markdownCache.delete(this.markdownCache.keys().next().value)
       return html

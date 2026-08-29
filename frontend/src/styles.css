@@ -11,6 +11,9 @@
 .branch-select { width: 160px; } .branch-select .el-input__inner { height: 26px; line-height: 26px; background: #252525; border-color: #3b3b3b; color: var(--muted); font-size: 11px; } .session-search { margin: 0 9px 7px; height: 29px; display: flex; align-items: center; gap: 7px; padding: 0 9px; border: 1px solid #303030; border-radius: 4px; background: #222; color: var(--faint); } .session-search input { min-width: 0; flex: 1; border: 0; outline: 0; background: transparent; color: var(--text); font-size: 11px; } .session-search input::placeholder { color: #696969; }
 :root { --bg: #f4f6f8; --panel: #ffffff; --panel-deep: #fbfcfe; --line: #e3e7ed; --line-soft: #eef1f5; --text: #1f2937; --muted: #667085; --faint: #98a2b3; --accent: #2563eb; --accent-ink: #ffffff; --blue: #2563eb; --danger: #d92d20; --warning: #b54708; }
 body { background: var(--bg); color: var(--text); }
+.markdown-body pre { position: relative; padding-right: 44px; }
+.code-copy-button { position: absolute; top: 8px; right: 8px; display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px; padding: 0; color: var(--faint); background: transparent; border: 0; border-radius: 4px; cursor: pointer; }
+.code-copy-button:hover, .code-copy-button:focus { color: var(--text); background: rgba(255,255,255,.1); outline: 0; }
 .shell { background: var(--bg); }
 .topbar { background: #ffffff; border-bottom-color: var(--line); box-shadow: 0 1px 3px rgba(16,24,40,.04); }
 .brand { color: #111827; }

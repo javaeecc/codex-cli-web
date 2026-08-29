@@ -86,7 +86,36 @@ public class GitService {
         Path path = guard.requireDirectory(rawPath);
         if (file == null || file.trim().isEmpty()) return limit(run(path, "diff", "--no-ext-diff", "--unified=999999").stdout);
         Path target = guard.requireInside(path, path.resolve(file));
-        return limit(run(path, "diff", "--no-ext-diff", "--unified=999999", "--", path.relativize(target).toString()).stdout);
+        String relative = path.relativize(target).toString();
+        String diff = run(path, "diff", "--no-ext-diff", "--unified=999999", "--", relative).stdout;
+        if (!diff.trim().isEmpty()) return limit(diff);
+
+        // A staged change is omitted from the default diff. Include it when the
+        // user clicks a file from the working-tree status list.
+        diff = run(path, "diff", "--cached", "--no-ext-diff", "--unified=999999", "--", relative).stdout;
+        if (!diff.trim().isEmpty()) return limit(diff);
+
+        // Untracked files have no index entry, so `git diff` has nothing to
+        // compare. `--no-index` creates the expected /dev/null -> file patch.
+        String status = run(path, "status", "--short", "--", relative).stdout.trim();
+        if (status.startsWith("??")) return limit(runNoIndexDiff(path, relative));
+        return "";
+    }
+
+    private String runNoIndexDiff(Path directory, String relative) {
+        List<String> command = new ArrayList<String>();
+        command.add("git");
+        command.addAll(java.util.Arrays.asList("diff", "--no-index", "--no-ext-diff", "--unified=999999", "/dev/null", relative));
+        try {
+            Process process = new ProcessBuilder(command).directory(directory.toFile()).redirectErrorStream(true).start();
+            BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream(), StandardCharsets.UTF_8));
+            StringBuilder output = new StringBuilder(); String line;
+            while ((line = reader.readLine()) != null) output.append(line).append('\n');
+            int exit = process.waitFor();
+            if (exit > 1) throw new ApiException(HttpStatus.BAD_REQUEST, "GIT_COMMAND_FAILED", output.toString().trim());
+            return output.toString();
+        } catch (IOException exception) { throw new ApiException(HttpStatus.SERVICE_UNAVAILABLE, "GIT_UNAVAILABLE", "鏈満 Git 涓嶅彲鐢?"); }
+        catch (InterruptedException exception) { Thread.currentThread().interrupt(); throw new ApiException(HttpStatus.INTERNAL_SERVER_ERROR, "GIT_INTERRUPTED", "Git 鎿嶄綔琚腑鏂?"); }
     }
 
     private String limit(String value) { return value.length() <= properties.getDiffMaxBytes() ? value : value.substring(0, properties.getDiffMaxBytes()) + "\n[Diff 已达到返回上限]"; }

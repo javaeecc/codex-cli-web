@@ -20,7 +20,7 @@
           </div>
         </details>
         <div v-if="message.role === 'user'" class="message-meta"><span class="avatar user">你</span><strong>你</strong><span>{{ formatTime(message.timestamp) }}</span></div>
-        <div v-if="message.role === 'assistant'" class="markdown-body" v-html="renderMarkdown(message.text)"></div>
+        <div v-if="message.role === 'assistant'" class="assistant-message"><div class="markdown-body" v-html="renderMarkdown(message.text)"></div></div>
         <div v-else-if="message.role === 'user'" class="user-message" @dblclick.stop="prepareResend(message)">{{ message.text }}<div v-if="resendMessageId === message.id" class="resend-action"><el-button type="primary" size="mini" icon="el-icon-position" :loading="sending" :disabled="sending" @click.stop="submitResend(message.text)">发送</el-button></div></div>
         <span v-if="message.role === 'assistant' && message.streaming" class="typing-cursor"></span>
       </div>
@@ -45,6 +45,14 @@ export default {
   data () { return { resendMessageId: null } },
   methods: {
     handleContentClick (event) {
+      const copyButton = event.target && event.target.closest ? event.target.closest('button[data-copy-code]') : null
+      if (copyButton) {
+        event.preventDefault()
+        event.stopPropagation()
+        const code = copyButton.parentElement && copyButton.parentElement.querySelector('code')
+        if (code) this.copyText(code.textContent)
+        return
+      }
       const link = event.target && event.target.closest ? event.target.closest('a[data-local-path]') : null
       if (!link) return
       event.preventDefault()
@@ -52,7 +60,29 @@ export default {
     },
     prepareResend (message) { if (message && message.role === 'user' && !this.sending) this.resendMessageId = message.id },
     submitResend (text) { if (!text || this.sending) return; this.resendMessageId = null; this.$emit('resend-message', text) },
-    clearResend () { this.resendMessageId = null }
+    clearResend () { this.resendMessageId = null },
+    async copyText (value) {
+      const text = String(value == null ? '' : value)
+      try {
+        if (navigator.clipboard && window.isSecureContext) {
+          await navigator.clipboard.writeText(text)
+        } else {
+          const textarea = document.createElement('textarea')
+          textarea.value = text
+          textarea.setAttribute('readonly', '')
+          textarea.style.position = 'fixed'
+          textarea.style.opacity = '0'
+          document.body.appendChild(textarea)
+          textarea.select()
+          const copied = document.execCommand('copy')
+          document.body.removeChild(textarea)
+          if (!copied) throw new Error('Clipboard access was denied')
+        }
+        this.$message.success('已复制')
+      } catch (e) {
+        this.$message.error('复制失败')
+      }
+    }
   }
 }
 </script>
