@@ -3,7 +3,7 @@ import axios from 'axios'
 const client = axios.create({ baseURL: '/api', timeout: 30000 })
 const AUTH_EXPIRED_EVENT = 'codex-web-auth-expired'
 const JWT_STORAGE_KEY = 'codex-web-jwt'
-const HISTORY_PAGE_SIZE = 300
+const HISTORY_PAGE_SIZE = 200
 let jwt = null
 
 function setJwt (value) {
