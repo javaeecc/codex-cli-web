@@ -3,6 +3,7 @@ import axios from 'axios'
 const client = axios.create({ baseURL: '/api', timeout: 30000 })
 const AUTH_EXPIRED_EVENT = 'codex-web-auth-expired'
 const JWT_STORAGE_KEY = 'codex-web-jwt'
+const HISTORY_PAGE_SIZE = 300
 let jwt = null
 
 function setJwt (value) {
@@ -50,7 +51,10 @@ export default {
   createSession: (projectId, payload) => client.post(`/projects/${projectId}/sessions`, payload),
   session: id => client.get(`/sessions/${id}`),
   events: (id, afterEventId) => client.get(`/sessions/${id}/events`, { params: afterEventId ? { after: afterEventId } : {} }),
-  history: (id, config) => client.get(`/sessions/${id}/history`, config),
+  history: (id, config = {}) => {
+    const request = { ...config, params: { ...(config.params || {}), limit: HISTORY_PAGE_SIZE } }
+    return client.get(`/sessions/${id}/history`, request)
+  },
   media: (id, mediaId) => client.get(`/sessions/${id}/media/${encodeURIComponent(mediaId)}`, { responseType: 'blob' }),
   streamUrl: id => `/api/sessions/${encodeURIComponent(id)}/stream`,
   streamHeaders: () => jwt ? { Authorization: `Bearer ${jwt}` } : {},
