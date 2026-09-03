@@ -246,6 +246,8 @@ java -jar target\codex-web.jar
 
 Windows 也可以直接双击项目根目录的 `start-codex-web.bat` 启动。
 
+该脚本会依次执行 Git 快进拉取、`mvn clean package`（其中会自动执行 `npm run build`）和 JAR 启动。目标机器需要将 Git、Maven 3.6+、JDK 8、Node.js 18+（包含 `npm.cmd`）加入系统 `PATH`。如果 Node.js 或 npm 安装在非标准目录，可在运行前设置 `CODEX_NODE_HOME` 和 `CODEX_NPM_HOME` 环境变量分别指向对应目录。
+
 ## 数据、日志与安全
 
 运行时数据默认保存在 `data/`：项目和设置为 JSON 文件，会话事件保存在 `data/sessions/`，上传文件在 `data/uploads/`，日志在 `data/logs/`。这些内容包含工作区路径、会话内容和执行结果，已通过 `.gitignore` 排除，不应提交到仓库。
