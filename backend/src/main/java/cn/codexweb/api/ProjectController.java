@@ -11,6 +11,10 @@ import org.springframework.web.bind.annotation.*;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.Instant;
+import java.time.format.DateTimeParseException;
+import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -18,7 +22,25 @@ import java.util.Map;
 public class ProjectController {
     private final ProjectStore projects; private final SessionStore sessions; private final WorkspaceGuard guard; private final GitService git;
     public ProjectController(ProjectStore projects, SessionStore sessions, WorkspaceGuard guard, GitService git) { this.projects = projects; this.sessions = sessions; this.guard = guard; this.git = git; }
-    @GetMapping("/api/projects") public List<Project> all() { return projects.all(); }
+    @GetMapping("/api/projects") public List<Project> all() {
+        List<Project> result = new ArrayList<Project>(projects.all());
+        Map<String, Instant> latestSessionTimes = new HashMap<String, Instant>();
+        for (Session session : sessions.all()) {
+            Instant sessionTime = parseTime(session.updatedAt, session.createdAt);
+            if (session.projectId == null || sessionTime == null) continue;
+            Instant current = latestSessionTimes.get(session.projectId);
+            if (current == null || sessionTime.isAfter(current)) latestSessionTimes.put(session.projectId, sessionTime);
+        }
+        result.sort((left, right) -> {
+            Instant leftTime = latestSessionTimes.containsKey(left.id)
+                    ? latestSessionTimes.get(left.id) : parseTime(left.lastUsedAt, left.updatedAt, left.createdAt);
+            Instant rightTime = latestSessionTimes.containsKey(right.id)
+                    ? latestSessionTimes.get(right.id) : parseTime(right.lastUsedAt, right.updatedAt, right.createdAt);
+            int byTime = compareTime(rightTime, leftTime);
+            return byTime != 0 ? byTime : String.valueOf(left.name).compareToIgnoreCase(String.valueOf(right.name));
+        });
+        return result;
+    }
     @GetMapping("/api/projects/{id}") public Project get(@PathVariable String id) { return require(id); }
     @GetMapping("/api/projects/{id}/sessions") public List<Session> projectSessions(@PathVariable String id) { require(id); return sessions.byProject(id); }
     @PostMapping("/api/projects") public Project create(@RequestBody Map<String, String> body) {
@@ -30,4 +52,17 @@ public class ProjectController {
     @PutMapping("/api/projects/{id}") public Project update(@PathVariable String id, @RequestBody Map<String, String> body) { Project project = require(id); if (body.get("name") != null) project.name = body.get("name").trim(); project.updatedAt = java.time.Instant.now().toString(); return projects.save(project); }
     @DeleteMapping("/api/projects/{id}") @ResponseStatus(HttpStatus.NO_CONTENT) public void delete(@PathVariable String id) { require(id); for (Session session : sessions.byProject(id)) { if ("RUNNING".equals(session.status) || "WAITING_APPROVAL".equals(session.status)) throw new ApiException(HttpStatus.CONFLICT, "PROJECT_BUSY", "项目有运行中的 Codex 任务或审批"); } for (Session session : sessions.byProject(id)) sessions.delete(session.id); projects.delete(id); }
     private Project require(String id) { Project result = projects.find(id); if (result == null) throw new ApiException(HttpStatus.NOT_FOUND, "PROJECT_NOT_FOUND", "项目不存在"); return result; }
+    private Instant parseTime(String... values) {
+        for (String value : values) {
+            if (value == null || value.trim().isEmpty()) continue;
+            try { return Instant.parse(value); } catch (DateTimeParseException ignored) { }
+        }
+        return null;
+    }
+    private int compareTime(Instant left, Instant right) {
+        if (left == right) return 0;
+        if (left == null) return 1;
+        if (right == null) return -1;
+        return left.compareTo(right);
+    }
 }
